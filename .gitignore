@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment
+.env
+
+# Logs
+logs/
+*.log
+test_run.log
+
+# Downloads & temp
+downloads/
+tmp_*.js
+nul
+
+# IDE / tools
+.claude/
+.playwright-mcp/
+inspect/
+inspect_archive/
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store

@@ -1,0 +1,31 @@
+{
+  "name": "bot-h2o",
+  "version": "1.0.0",
+  "description": "H2O Insurance Agency - Automated Bot for NowCerts via Playwright",
+  "main": "dist/main.js",
+  "scripts": {
+    "start": "node dist/main.js",
+    "dev": "ts-node-dev --respawn --transpile-only src/main.ts",
+    "build": "tsc",
+    "lint": "eslint src/**/*.ts"
+  },
+  "dependencies": {
+    "@playwright/test": "^1.41.0",
+    "dotenv": "^16.4.1",
+    "exceljs": "^4.4.0",
+    "imap-simple": "^5.1.0",
+    "mailparser": "^3.7.1",
+    "nodemailer": "^6.9.9",
+    "playwright": "^1.41.0",
+    "winston": "^3.11.0"
+  },
+  "devDependencies": {
+    "@types/imap-simple": "^4.2.3",
+    "@types/mailparser": "^3.4.4",
+    "@types/nodemailer": "^6.4.14",
+    "@types/node": "^20.11.5",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.3.3"
+  }
+}
