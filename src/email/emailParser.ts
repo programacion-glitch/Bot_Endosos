@@ -28,7 +28,7 @@ function parseSubject(subject: string): { clientName?: string; usdot?: string } 
   namePart = namePart.replace(/USDOT\s+[A-Z0-9]+/i, '');
   
   // 2. Remove prefixes/suffixes anywhere in the string
-  namePart = namePart.replace(/\b(END-BOT|DOCUMENTAR\s+CLIENTE|EFFECTIVE\s+DATE\s+[\d\/]+)\b/gi, '');
+  namePart = namePart.replace(/\b(BOT-END|END-BOT|DOCUMENTAR\s+CLIENTE|EFFECTIVE\s+DATE\s+[\d\/]+)\b/gi, '');
   
   // 3. Clean up the slashes and trim
   namePart = namePart.replace(/\s*\/\/\s*/g, ' ').replace(/\s+/g, ' ').trim();
@@ -122,7 +122,7 @@ function parseDriverLine(line: string): Driver | null {
   const cdlM =
     line.match(/CDL:\s*([\w]+)\s*\((\w{2})\)/i) ??   // with parens
     line.match(/CDL:\s*([\w]+)\s+([A-Z]{2})\b/i);     // without parens
-  const dobM = line.match(/DOB:\s*([\d/]+)/i);
+  const dobM = line.match(/DOB:?\s*([\d/]+)/i);
 
   if (!nameM || !lastM || !cdlM || !dobM) return null;
 
@@ -211,9 +211,9 @@ function parseBlock(block: string): Command | null {
   }
 
   // ── Remove Vehicle/Trailer ────────────────────────────────────────────────
-  if (/^Remove\s+(?:Vehicle\/Trailer|Vehicle|Trailer)\b(?!\s*\/Driver)/i.test(firstLine)) {
+  if (/^(?:Remove|Delete)\s+(?:Vehicle\/Trailer|Vehicle|Trailer)\b(?!\s*\/Driver)/i.test(firstLine)) {
     const vinM = firstLine.match(/VIN#:?\s*([\w]+)/i);
-    const yearM = firstLine.match(/Year:\s*(\d{4})/i);
+    const yearM = firstLine.match(/Year:\s*(\d{1,2},?\d{3}|\d{4})/i);
     const descM = firstLine.match(/Description:\s*([^/]+)/i);
     const valueM = firstLine.match(/Value:\s*(\$[\d,]+[^/]*)/i);
     const effM = firstLine.match(/Effective\s*Date:\s*([\d/]+)/i)

@@ -1,7 +1,7 @@
 import { Page } from 'playwright';
 import { AddDriverCommand, ActionResult } from '../types';
 import { logger } from '../utils/logger';
-import { ok, fail, waitForSaveConfirmation, buildNowCertsUrl } from './_base';
+import { ok, fail, waitForSaveConfirmation, buildNowCertsUrl, getInsuredIdFromUrl, buildInsuredUrl } from './_base';
 
 const STATE_NAMES: Record<string, string> = {
   AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California',
@@ -42,19 +42,18 @@ async function selectNgSelect(page: Page, index: number, value: string): Promise
   }
 }
 
-async function fillKendoDateByIndex(page: Page, index: number, dateStr: string): Promise<void> {
-  const inputs = page.locator('input.k-input');
-  if (await inputs.count() <= index) return;
-  const input = inputs.nth(index);
-  const [mm, dd, yyyy] = dateStr.split('/');
-  await input.click();
+/**
+ * Fills a Kendo datepicker spinbutton by typing digits only (no slashes).
+ * The Kendo widget auto-advances between month/day/year segments.
+ * dateStr must be in MM/DD/YYYY format.
+ */
+async function fillKendoDate(page: Page, locator: ReturnType<Page['locator']>, dateStr: string): Promise<void> {
+  const digits = dateStr.replace(/\//g, ''); // "09/13/1985" -> "09131985"
+  await locator.click();
   await page.waitForTimeout(200);
-  await input.fill('');
-  await input.type(mm, { delay: 80 });
-  await input.type(dd, { delay: 80 });
-  await input.type(yyyy, { delay: 50 });
+  await locator.pressSequentially(digits, { delay: 80 });
   await page.keyboard.press('Tab');
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(300);
 }
 
 /**
@@ -66,15 +65,14 @@ export async function addDriver(page: Page, cmd: AddDriverCommand): Promise<Acti
   logger.info(`addDriver: ${driver.firstName} ${driver.lastName}`);
 
   try {
-    // Confirmed live flow:
-    // insured -> Insured Items -> Drivers -> + Add New -> /AMSINS/Drivers/Insert
-    await page.locator('button').filter({ hasText: /^Insured Items$/i }).first().click();
-    await page.waitForTimeout(500);
-    await page.locator('a[href*="/Drivers"]').first().click();
-    await page.waitForURL('**/AMSINS/Insureds/Details/*/Drivers', { timeout: 15_000 }).catch(() => {});
-    await page.waitForTimeout(1200);
+    // Navigate directly to the Drivers list using the insured ID from the URL
+    const insuredId = getInsuredIdFromUrl(page);
+    const driversUrl = buildInsuredUrl(insuredId, 'Drivers');
+    await page.goto(driversUrl, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1500);
 
-    const addLink = page.locator('a.action-insert').filter({ hasText: /\+ Add New/i }).first();
+    // Click "+ Add New" to go to the Insert driver page
+    const addLink = page.locator('a').filter({ hasText: /\+ Add New/i }).first();
     const href = await addLink.getAttribute('href');
     if (href) {
       const fullUrl = href.startsWith('http') ? href : buildNowCertsUrl(href);
@@ -85,15 +83,26 @@ export async function addDriver(page: Page, cmd: AddDriverCommand): Promise<Acti
     await page.waitForURL('**/AMSINS/Drivers/Insert**', { timeout: 20_000 }).catch(() => {});
     await page.waitForTimeout(2000);
 
-    // Confirmed fields on live page
+    // ── General section ──────────────────────────────────────────────────
     await page.fill('input[placeholder="First Name"]', driver.firstName);
     await page.fill('input[placeholder="Last Name"]', driver.lastName);
-    await fillKendoDateByIndex(page, 0, driver.dob);
-    await page.fill('input[placeholder="DL Number"]', driver.cdl);
-    // First ng-select after DL Number is DL State on the live insert page
-    await selectNgSelect(page, 0, driver.cdlState);
 
-    await page.locator('span.btn.btn-primary.cursor-pointer').filter({ hasText: /^Save Changes$/i }).first().click({ force: true });
+    // Date of Birth – kendo datepicker (spinbutton). Type digits only, no slashes.
+    const dobInput = page.locator('kendo-datepicker input').first();
+    await fillKendoDate(page, dobInput, driver.dob);
+
+    // ── Additional section ───────────────────────────────────────────────
+    await page.fill('input[placeholder="DL Number"]', driver.cdl);
+
+    // DL Status (ng-select index 0) → "Active"
+    // DL State  (ng-select index 1) → driver's state (full name)
+    await selectNgSelect(page, 0, 'Active');
+    await selectNgSelect(page, 1, driver.cdlState);
+
+    // ── Save ─────────────────────────────────────────────────────────────
+    // The save button is a <button> element with text "Save Changes"
+    const saveBtn = page.locator('button').filter({ hasText: /^Save Changes$/i }).first();
+    await saveBtn.click({ force: true });
     await waitForSaveConfirmation(page);
 
     return ok('ADD_DRIVER', `Driver ${driver.firstName} ${driver.lastName} added.`);

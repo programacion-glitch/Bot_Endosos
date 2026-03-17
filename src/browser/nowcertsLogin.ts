@@ -108,9 +108,23 @@ export async function navigateToClient(
 
   const exactResult = page.locator('a').filter({ hasText: new RegExp(`^${escapeRegex(clientName)}$`, 'i') }).first();
   const partialResult = page.locator('a').filter({ hasText: new RegExp(escapeRegex(clientName), 'i') }).first();
-  const result = (await exactResult.count()) > 0 ? exactResult : partialResult;
 
-  if (await result.count() === 0) {
+  // When searching by USDOT the client name in NowCerts may differ from the email
+  // (e.g. missing "DBA ..." suffix). Fall back to any Insured Details link in the results.
+  const insuredLink = page.locator('a[href*="/AMSINS/Insureds/Details/"]').first();
+
+  let result = (await exactResult.count()) > 0
+    ? exactResult
+    : (await partialResult.count()) > 0
+      ? partialResult
+      : null;
+
+  if (!result && usdot && (await insuredLink.count()) > 0) {
+    logger.info(`Exact/partial name not found, using first insured result from USDOT search`);
+    result = insuredLink;
+  }
+
+  if (!result || (await result.count()) === 0) {
     logger.warn(`Client not found in Global Search: "${clientName}"`);
     return false;
   }
