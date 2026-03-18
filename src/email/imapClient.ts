@@ -45,8 +45,11 @@ async function getConnection(): Promise<ImapSimple> {
   return connection;
 }
 
+/** Subject prefixes the bot recognises */
+const VALID_SUBJECT_PREFIXES = ['BOT-END', 'DOCUMENTAR CLIENTE'];
+
 /**
- * Fetches all UNSEEN emails from the inbox.
+ * Fetches UNSEEN emails whose subject starts with a valid prefix.
  */
 export async function fetchUnseenEmails(): Promise<RawEmail[]> {
   let conn: ImapSimple;
@@ -59,29 +62,47 @@ export async function fetchUnseenEmails(): Promise<RawEmail[]> {
 
   await conn.openBox(config.imap.mailbox);
 
-  const messages = await conn.search(['UNSEEN'], {
-    bodies: ['HEADER.FIELDS (FROM TO SUBJECT DATE)', 'TEXT', ''],
-    markSeen: false, // We mark as seen after successful processing
-  });
+  // Server-side filter: UNSEEN + subject contains BOT-END or DOCUMENTAR CLIENTE
+  const messages = await conn.search(
+    [
+      'UNSEEN',
+      ['OR',
+        ['HEADER', 'SUBJECT', 'BOT-END'],
+        ['HEADER', 'SUBJECT', 'DOCUMENTAR CLIENTE'],
+      ],
+    ],
+    {
+      bodies: ['HEADER.FIELDS (FROM TO SUBJECT DATE)', 'TEXT', ''],
+      markSeen: false,
+    },
+  );
 
   if (messages.length === 0) {
     logger.debug('No new emails found.');
     return [];
   }
 
-  logger.info(`Found ${messages.length} unseen email(s).`);
+  logger.info(`Found ${messages.length} unseen email(s) matching subject filter.`);
 
   const emails: RawEmail[] = [];
 
   for (const message of messages) {
     try {
-      const raw = emails.push(await parseMessage(message));
+      emails.push(await parseMessage(message));
     } catch (err) {
       logger.error(`Failed to parse email: ${(err as Error).message}`);
     }
   }
 
-  return emails;
+  // Client-side safety net: verify subject actually starts with a valid prefix
+  return emails.filter(e => {
+    const upper = e.subject.toUpperCase().trim();
+    const valid = VALID_SUBJECT_PREFIXES.some(p => upper.startsWith(p));
+    if (!valid) {
+      logger.debug(`Skipping email with non-matching subject: "${e.subject}"`);
+    }
+    return valid;
+  });
 }
 
 async function parseMessage(message: Message): Promise<RawEmail> {
@@ -116,6 +137,45 @@ export async function markAsSeen(uid: number): Promise<void> {
     logger.debug(`Email UID ${uid} marked as SEEN.`);
   } catch (err) {
     logger.warn(`Could not mark UID ${uid} as SEEN: ${(err as Error).message}`);
+  }
+}
+
+/**
+ * Ensures a mailbox (Gmail label/folder) exists, creating it if necessary.
+ */
+export async function ensureMailbox(mailboxName: string): Promise<void> {
+  const conn = await getConnection();
+  const rawImap = (conn as any)._imap;
+  return new Promise<void>((resolve) => {
+    rawImap.addBox(mailboxName, (err: Error | null) => {
+      if (err) {
+        logger.debug(`Mailbox "${mailboxName}" check: ${err.message}`);
+      } else {
+        logger.info(`Created mailbox "${mailboxName}".`);
+      }
+      resolve();
+    });
+  });
+}
+
+/**
+ * Moves an email from INBOX to a destination folder by UID.
+ */
+export async function moveToFolder(uid: number, folder: string): Promise<void> {
+  try {
+    const conn = await getConnection();
+    await conn.openBox(config.imap.mailbox);
+    const rawImap = (conn as any)._imap;
+    await new Promise<void>((resolve, reject) => {
+      rawImap.move(uid, folder, (err: Error | null) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+    logger.debug(`Email UID ${uid} moved to "${folder}".`);
+  } catch (err) {
+    logger.warn(`Could not move UID ${uid} to "${folder}": ${(err as Error).message}. Marking as seen instead.`);
+    await markAsSeen(uid);
   }
 }
 

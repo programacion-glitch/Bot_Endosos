@@ -15,28 +15,38 @@ import {
 import { logger } from '../utils/logger';
 
 // ─── Subject parsing ──────────────────────────────────────────────────────────
-// Expected subject format: "ClientName // USDOT 123456" or just "ClientName"
+// Expected formats:
+//   TIPO // ClientName // USDOT 123456
+//   TIPO // ClientName // DBA SomeName
+//   TIPO // ClientName // USDOT 123456 // DBA SomeName
 const SUBJECT_USDOT_RE = /USDOT\s+([A-Z0-9]+)/i;
+const SUBJECT_DBA_RE = /\bDBA\s+([^/]+)/i;
 
-function parseSubject(subject: string): { clientName?: string; usdot?: string } {
+function parseSubject(subject: string): { clientName?: string; usdot?: string; dba?: string } {
   const usdotMatch = subject.match(SUBJECT_USDOT_RE);
   const usdot = usdotMatch?.[1];
 
+  const dbaMatch = subject.match(SUBJECT_DBA_RE);
+  const dba = dbaMatch?.[1]?.trim() || undefined;
+
   let namePart = subject;
-  
+
   // 1. Remove USDOT
   namePart = namePart.replace(/USDOT\s+[A-Z0-9]+/i, '');
-  
-  // 2. Remove prefixes/suffixes anywhere in the string
+
+  // 2. Remove DBA and its value
+  namePart = namePart.replace(/\bDBA\s+[^/]+/i, '');
+
+  // 3. Remove prefixes/suffixes anywhere in the string
   namePart = namePart.replace(/\b(BOT-END|END-BOT|DOCUMENTAR\s+CLIENTE|EFFECTIVE\s+DATE\s+[\d\/]+)\b/gi, '');
-  
-  // 3. Clean up the slashes and trim
+
+  // 4. Clean up the slashes and trim
   namePart = namePart.replace(/\s*\/\/\s*/g, ' ').replace(/\s+/g, ' ').trim();
-  
-  // 4. If there's a stray slash at start or end, remove it
+
+  // 5. If there's a stray slash at start or end, remove it
   namePart = namePart.replace(/^\/+|\/+$/g, '').trim();
 
-  return { clientName: namePart || undefined, usdot };
+  return { clientName: namePart || undefined, usdot, dba };
 }
 
 // ─── Language detection ───────────────────────────────────────────────────────
@@ -447,7 +457,7 @@ function parseBlock(block: string): Command | null {
 // ─── Main parser ──────────────────────────────────────────────────────────────
 
 export function parseEmail(raw: RawEmail): ParsedEmail {
-  const { clientName, usdot } = parseSubject(raw.subject);
+  const { clientName, usdot, dba } = parseSubject(raw.subject);
 
   const blocks = splitCommandBlocks(raw.body);
   const commands: Command[] = [];
@@ -472,6 +482,7 @@ export function parseEmail(raw: RawEmail): ParsedEmail {
     body: raw.body,
     clientName,
     usdot,
+    dba,
     commands,
     agent,
     language,

@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { startPolling, markAsSeen, closeImap, RawEmail } from './email/imapClient';
+import { startPolling, markAsSeen, moveToFolder, ensureMailbox, closeImap, RawEmail } from './email/imapClient';
 import { parseEmail } from './email/emailParser';
 import { dispatchCommands } from './actions/dispatcher';
 import { getNowCertsPage, navigateToClient, invalidateSession } from './browser/nowcertsLogin';
@@ -7,13 +7,65 @@ import { closeBrowser, screenshot } from './browser/browserManager';
 import { sendReviewEmail, sendClientApprovalEmail, sendAlertEmail } from './email/emailSender';
 import { findAgentEmails } from './utils/agentLookup';
 import { logger, logEmailProcessing } from './utils/logger';
-import { ActionResult } from './types';
+import { ActionResult, Command } from './types';
+
+const PROCESSED_FOLDER = 'H2O-Endosos';
+
+// ─── Subject prefix validation ───────────────────────────────────────────────
+
+type SubjectPrefix = 'BOT-END' | 'DOCUMENTAR CLIENTE';
+
+function getSubjectPrefix(subject: string): SubjectPrefix | null {
+  const upper = subject.toUpperCase().trim();
+  if (upper.startsWith('DOCUMENTAR CLIENTE')) return 'DOCUMENTAR CLIENTE';
+  if (upper.startsWith('BOT-END')) return 'BOT-END';
+  return null;
+}
+
+function validateCoherence(
+  prefix: SubjectPrefix,
+  commands: Command[],
+): { valid: boolean; reason?: string } {
+  const hasCreateInsured = commands.some(c => c.type === 'CREATE_INSURED');
+
+  if (prefix === 'DOCUMENTAR CLIENTE' && !hasCreateInsured) {
+    return {
+      valid: false,
+      reason: 'Subject says DOCUMENTAR CLIENTE but no CREATE_INSURED command found in body',
+    };
+  }
+
+  if (prefix === 'BOT-END' && hasCreateInsured) {
+    return {
+      valid: false,
+      reason: 'Subject says BOT-END (existing client) but body contains CREATE_INSURED command',
+    };
+  }
+
+  return { valid: true };
+}
 
 async function processEmail(raw: RawEmail): Promise<void> {
+  // Validate subject prefix
+  const prefix = getSubjectPrefix(raw.subject);
+  if (!prefix) {
+    logger.warn(`Email subject doesn't match valid prefixes (BOT-END / DOCUMENTAR CLIENTE): "${raw.subject}" — skipping.`);
+    await markAsSeen(raw.uid);
+    return;
+  }
+
   const email = parseEmail(raw);
 
   if (email.commands.length === 0) {
     logger.warn(`No commands found in email: "${email.subject}" — skipping.`);
+    await markAsSeen(raw.uid);
+    return;
+  }
+
+  // Validate coherence between subject prefix and commands
+  const coherence = validateCoherence(prefix, email.commands);
+  if (!coherence.valid) {
+    logger.warn(`Coherence validation failed for "${email.subject}": ${coherence.reason} — skipping.`);
     await markAsSeen(raw.uid);
     return;
   }
@@ -73,8 +125,12 @@ async function processEmail(raw: RawEmail): Promise<void> {
     }
   }
 
-  // Mark email as seen (processed)
-  await markAsSeen(raw.uid);
+  // Move to processed folder if all commands succeeded, otherwise just mark as seen
+  if (failures.length === 0) {
+    await moveToFolder(raw.uid, PROCESSED_FOLDER);
+  } else {
+    await markAsSeen(raw.uid);
+  }
 
   logger.info(
     `Email processed: ${successes.length} ok, ${failures.length} failed. ` +
@@ -113,6 +169,14 @@ async function main(): Promise<void> {
     await closeBrowser();
     process.exit(0);
   });
+
+  // Ensure the processed-emails folder exists in Gmail
+  try {
+    await ensureMailbox(PROCESSED_FOLDER);
+    logger.info(`Mailbox "${PROCESSED_FOLDER}" ready.`);
+  } catch (err) {
+    logger.warn(`Could not verify mailbox "${PROCESSED_FOLDER}": ${(err as Error).message}`);
+  }
 
   // Pre-warm browser + login
   try {

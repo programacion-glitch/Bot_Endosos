@@ -255,6 +255,7 @@ export interface ParsedEmail {
   // Extracted from subject
   clientName?: string;
   usdot?: string;
+  dba?: string;
   // Extracted from body
   commands: Command[];
   agent?: string;
