@@ -75,14 +75,15 @@ export function todayYYYYMMdd(): string {
 }
 
 /**
- * Removes trailing period and DBA text from a client name field.
+ * Removes trailing period, year range (e.g. "2026 - 2027"), and DBA text from a client name field.
  * Used when editing certificates/ID cards.
  */
 export function cleanClientName(raw: string): string {
+  let name = raw.trim();
   // Remove trailing period
-  let name = raw.replace(/\.\s*$/, '').trim();
-  // Remove " DBA: ..." suffix
-  name = name.replace(/\s+DBA:?.*/i, '').trim();
+  name = name.replace(/\.\s*$/, '').trim();
+  // Remove year range like "2026 - 2027" anywhere in the string (keep DBA)
+  name = name.replace(/\s+\d{4}\s*-\s*\d{4}/, '').trim();
   return name;
 }
 
@@ -146,3 +147,53 @@ export function buildTruckingCompanyDetailsUrl(insuredId: string, pageNum?: numb
   const base = buildNowCertsUrl(`/TruckingCompanies/Details.aspx?Id=${insuredId}`);
   return pageNum ? `${base}&Page=${pageNum}` : base;
 }
+
+/* ------------------------------------------------------------------ */
+/*  Shared utility functions & constants (centralised from actions)   */
+/* ------------------------------------------------------------------ */
+
+/** Escapes special regex characters so the string can be used in `new RegExp(...)`. */
+export function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Extracts only digit characters from a string. */
+export function toDigits(value?: string): string {
+  return (value ?? '').replace(/[^\d]/g, '');
+}
+
+/** Returns a CSS attribute selector matching an element whose `id` ends with `suffix`. */
+export function byIdEndsWith(suffix: string): string {
+  return `[id$="${suffix}"]`;
+}
+
+/** Two-letter state abbreviation → full state name. */
+export const STATE_NAMES: Record<string, string> = {
+  AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California',
+  CO: 'Colorado', CT: 'Connecticut', DE: 'Delaware', FL: 'Florida', GA: 'Georgia',
+  HI: 'Hawaii', ID: 'Idaho', IL: 'Illinois', IN: 'Indiana', IA: 'Iowa',
+  KS: 'Kansas', KY: 'Kentucky', LA: 'Louisiana', ME: 'Maine', MD: 'Maryland',
+  MA: 'Massachusetts', MI: 'Michigan', MN: 'Minnesota', MS: 'Mississippi', MO: 'Missouri',
+  MT: 'Montana', NE: 'Nebraska', NV: 'Nevada', NH: 'New Hampshire', NJ: 'New Jersey',
+  NM: 'New Mexico', NY: 'New York', NC: 'North Carolina', ND: 'North Dakota', OH: 'Ohio',
+  OK: 'Oklahoma', OR: 'Oregon', PA: 'Pennsylvania', RI: 'Rhode Island', SC: 'South Carolina',
+  SD: 'South Dakota', TN: 'Tennessee', TX: 'Texas', UT: 'Utah', VT: 'Vermont',
+  VA: 'Virginia', WA: 'Washington', WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming',
+  DC: 'District of Columbia',
+};
+
+/** Converts a two-letter state abbreviation to its full name, falling back to the original value. */
+export function toFullStateName(value: string): string {
+  return STATE_NAMES[value.toUpperCase()] ?? value;
+}
+
+/** Maps policy type codes to the display labels used in NowCerts policy grids. */
+export const LINE_LABELS: Record<string, string> = {
+  AL: 'Commercial Auto',
+  NTL: 'Commercial Auto',
+  MTC: 'Motor Truck Cargo',
+  APD: 'Physical Damage',
+  GL: 'General Liability',
+  WC: "Worker's Compensation",
+  EXL: 'Excess Liability',
+};
