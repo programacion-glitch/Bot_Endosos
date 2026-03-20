@@ -1,12 +1,8 @@
 import { Page } from 'playwright';
 import { ActionResult } from '../types';
 import { logger } from '../utils/logger';
-import { ok, fail, waitForSaveConfirmation, cleanClientName, getInsuredUrl } from './_base';
+import { ok, fail, waitForSaveConfirmation, cleanClientName, getInsuredUrl, escapeRegex } from './_base';
 import { config } from '../config/config';
-
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
 
 async function chooseAuthorizedRepresentative(page: Page, authorizedRep: string): Promise<void> {
   const combo = page.locator('#ctl00_ContentPlaceHolder1_usrAcord25_usrSignatureSelector_rcbSignatures').first();

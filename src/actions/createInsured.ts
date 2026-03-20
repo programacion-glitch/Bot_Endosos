@@ -1,7 +1,7 @@
 import { Page } from 'playwright';
 import { CreateInsuredCommand, ActionResult } from '../types';
 import { logger } from '../utils/logger';
-import { ok, fail, waitForSaveConfirmation, buildNowCertsUrl } from './_base';
+import { ok, fail, waitForSaveConfirmation, buildNowCertsUrl, STATE_NAMES, toFullStateName } from './_base';
 
 /**
  * CREATE INSURED
@@ -28,25 +28,6 @@ import { ok, fail, waitForSaveConfirmation, buildNowCertsUrl } from './_base';
  *  - Primary Email: trucking-companies-redirect-popover input[type="text"]  OR  input[placeholder="Primary Email"]
  *  - Save:          button:has-text("Save Changes")
  */
-
-// State abbreviation → full name map
-const STATE_NAMES: Record<string, string> = {
-  AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California',
-  CO: 'Colorado', CT: 'Connecticut', DE: 'Delaware', FL: 'Florida', GA: 'Georgia',
-  HI: 'Hawaii', ID: 'Idaho', IL: 'Illinois', IN: 'Indiana', IA: 'Iowa',
-  KS: 'Kansas', KY: 'Kentucky', LA: 'Louisiana', ME: 'Maine', MD: 'Maryland',
-  MA: 'Massachusetts', MI: 'Michigan', MN: 'Minnesota', MS: 'Mississippi', MO: 'Missouri',
-  MT: 'Montana', NE: 'Nebraska', NV: 'Nevada', NH: 'New Hampshire', NJ: 'New Jersey',
-  NM: 'New Mexico', NY: 'New York', NC: 'North Carolina', ND: 'North Dakota', OH: 'Ohio',
-  OK: 'Oklahoma', OR: 'Oregon', PA: 'Pennsylvania', RI: 'Rhode Island', SC: 'South Carolina',
-  SD: 'South Dakota', TN: 'Tennessee', TX: 'Texas', UT: 'Utah', VT: 'Vermont',
-  VA: 'Virginia', WA: 'Washington', WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming',
-  DC: 'District of Columbia',
-};
-
-function toFullStateName(abbr: string): string {
-  return STATE_NAMES[abbr.toUpperCase()] ?? abbr;
-}
 
 /** Select from an ng-select (state-selector) component — uses full state name */
 async function selectNgSelect(
@@ -143,6 +124,7 @@ export async function createInsured(
     for (let attempt = 0; attempt < 3; attempt++) {
       await page.goto(buildNowCertsUrl('/AMSINS/Insureds/Insert'), {
         waitUntil: 'domcontentloaded',
+        timeout: 60_000,
       });
       // Wait for Angular router to settle (it may redirect to old ASPX first)
       await page.waitForTimeout(3000);

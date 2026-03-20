@@ -1,7 +1,7 @@
 import { Page } from 'playwright';
 import { DeleteVehicleValueCommand, ActionResult } from '../types';
 import { logger } from '../utils/logger';
-import { ok, fail, getInsuredUrl, getInsuredIdFromUrl, buildNowCertsUrl } from './_base';
+import { ok, fail, escapeRegex, getInsuredUrl, getInsuredIdFromUrl, buildNowCertsUrl } from './_base';
 
 async function openVehicles(page: Page): Promise<void> {
   await page.goto(getInsuredUrl(page, 'Vehicles'), {
@@ -13,7 +13,7 @@ async function openVehicles(page: Page): Promise<void> {
 async function resolveVehicleEditUrl(page: Page, vin: string): Promise<string> {
   await openVehicles(page);
 
-  const row = page.locator('tr').filter({ hasText: new RegExp(vin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') }).first();
+  const row = page.locator('tr').filter({ hasText: new RegExp(escapeRegex(vin), 'i') }).first();
   if (await row.count() === 0) {
     throw new Error(`Vehicle row not found for VIN ${vin}`);
   }

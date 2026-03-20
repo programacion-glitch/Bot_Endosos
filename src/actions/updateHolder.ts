@@ -1,12 +1,8 @@
 import { Page } from 'playwright';
 import { UpdateHolderCommand, ActionResult } from '../types';
 import { logger } from '../utils/logger';
-import { ok, fail, todayYYYYMMdd, safeFilenamePart, waitForSaveConfirmation } from './_base';
+import { ok, fail, todayYYYYMMdd, safeFilenamePart, waitForSaveConfirmation, escapeRegex } from './_base';
 import { downloadCertificate } from './_holderHelpers';
-
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
 
 function looksLikeAddressUpdate(value: string): boolean {
   const trimmed = value.trim();

@@ -3,6 +3,7 @@ import { AddPolicyCommand, AddVehicleCommand, ActionResult, Command } from '../t
 import { logger } from '../utils/logger';
 import {
   cleanClientName,
+  escapeRegex,
   fail,
   getInsuredUrl,
   ok,
@@ -10,51 +11,12 @@ import {
   triggerDownload,
   waitForSaveConfirmation,
 } from './_base';
-
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
+import { selectRadComboByText } from './_policyHelpers';
 
 function normalizeDateValue(value: string): string {
   const parts = value.split(/[^\d]/).filter(Boolean);
   if (parts.length !== 3) return value.trim();
   return `${Number(parts[0])}/${Number(parts[1])}/${parts[2]}`;
-}
-
-async function selectRadComboByText(page: Page, arrowSelector: string, text: string): Promise<boolean> {
-  const arrow = page.locator(arrowSelector).first();
-  if (await arrow.count() === 0) return false;
-
-  await arrow.click({ force: true }).catch(async () => {
-    await arrow.evaluate((el: any) => el.click());
-  });
-  await page.waitForTimeout(400);
-
-  const exact = page.locator('li.rcbItem, li.rcbHovered, .rcbList li').filter({
-    hasText: new RegExp(`^${escapeRegex(text)}$`, 'i'),
-  }).first();
-  const partial = page.locator('li.rcbItem, li.rcbHovered, .rcbList li').filter({
-    hasText: new RegExp(escapeRegex(text), 'i'),
-  }).first();
-
-  if (await exact.count() > 0) {
-    await exact.click({ force: true }).catch(async () => {
-      await exact.evaluate((el: any) => el.click());
-    });
-    await page.waitForTimeout(300);
-    return true;
-  }
-
-  if (await partial.count() > 0) {
-    await partial.click({ force: true }).catch(async () => {
-      await partial.evaluate((el: any) => el.click());
-    });
-    await page.waitForTimeout(300);
-    return true;
-  }
-
-  await page.keyboard.press('Escape').catch(() => {});
-  return false;
 }
 
 function inferVehicleType(cmd: AddVehicleCommand): 'Truck' | 'Trailer' {
@@ -81,21 +43,46 @@ function getPriorALPolicyNumber(commands: Command[], currentCommand: AddVehicleC
 }
 
 async function resolveIdCardPolicyNumber(
-  _page: Page,
+  page: Page,
   cmd: AddVehicleCommand,
   commands: Command[]
 ): Promise<string | null> {
-  if (inferVehicleType(cmd) !== 'Truck') {
-    logger.info(`createIDCard: skipped for trailer VIN ${cmd.vin}`);
-    return null;
-  }
-
+  // 1. Check if an AL policy was added in the current email
   const priorALPolicyNumber = getPriorALPolicyNumber(commands, cmd);
   if (priorALPolicyNumber) {
     return priorALPolicyNumber;
   }
 
-  logger.info(`createIDCard: skipped for VIN ${cmd.vin} because no AL policy was added in current request context`);
+  // 2. Search for an existing AL policy (Commercial Auto) on the insured's policies page
+  try {
+    const policiesUrl = getInsuredUrl(page, 'Policies');
+    await page.goto(policiesUrl, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(3000);
+
+    // Find rows in the policies grid that have "Commercial Auto" in the Lines of Business column
+    const rows = page.locator('[role="grid"] [role="row"]');
+    const rowCount = await rows.count();
+
+    for (let i = 0; i < rowCount; i++) {
+      const row = rows.nth(i);
+      const lobCell = row.locator('[role="gridcell"]').filter({ hasText: /Commercial\s*Auto/i }).first();
+      if (await lobCell.count() > 0) {
+        // Get the policy number from the link in the same row
+        const policyLink = row.locator('[role="gridcell"] a[href*="/Policies/Details/"]').first();
+        if (await policyLink.count() > 0) {
+          const policyNumber = (await policyLink.textContent() ?? '').trim();
+          if (policyNumber) {
+            logger.info(`Found existing AL policy in NowCerts: ${policyNumber}`);
+            return policyNumber;
+          }
+        }
+      }
+    }
+
+    logger.info(`createIDCard: no existing AL policy found for VIN ${cmd.vin}`);
+  } catch (err) {
+    logger.warn(`Could not search for existing AL policy: ${(err as Error).message}`);
+  }
 
   return null;
 }

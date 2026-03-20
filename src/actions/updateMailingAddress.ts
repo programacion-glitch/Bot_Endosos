@@ -4,6 +4,7 @@ import { logger } from '../utils/logger';
 import {
   ok,
   fail,
+  escapeRegex,
   getInsuredIdFromUrl,
   buildInsuredUrl,
   buildTruckingCompanyDetailsUrl,
@@ -57,7 +58,7 @@ async function selectRadComboByText(page: Page, inputSelector: string, arrowSele
   await page.waitForTimeout(600);
 
   const option = page.locator('li.rcbItem, li.rcbHovered, .rcbList li').filter({
-    hasText: new RegExp(`^${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'),
+    hasText: new RegExp(`^${escapeRegex(value)}$`, 'i'),
   }).first();
   if (await option.count() > 0) {
     await option.click({ force: true }).catch(async () => {
