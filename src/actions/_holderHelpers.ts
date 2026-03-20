@@ -2,31 +2,13 @@
  * Shared helpers for Additional Interests / Holder operations.
  * Reused by addAdditionalInsured, addWaiverSubrogation, addNoteToHolder, addLossPayee, etc.
  */
-import { Page } from 'playwright';
+import { Page, Locator } from 'playwright';
 import { HolderInfo } from '../types';
 import { logger } from '../utils/logger';
 import { config } from '../config/config';
-import { getInsuredUrl } from './_base';
+import { getInsuredUrl, escapeRegex, STATE_NAMES, toFullStateName } from './_base';
 import fs from 'fs';
 import path from 'path';
-
-const STATE_NAMES: Record<string, string> = {
-  AL: 'Alabama', AK: 'Alaska', AZ: 'Arizona', AR: 'Arkansas', CA: 'California',
-  CO: 'Colorado', CT: 'Connecticut', DE: 'Delaware', FL: 'Florida', GA: 'Georgia',
-  HI: 'Hawaii', ID: 'Idaho', IL: 'Illinois', IN: 'Indiana', IA: 'Iowa',
-  KS: 'Kansas', KY: 'Kentucky', LA: 'Louisiana', ME: 'Maine', MD: 'Maryland',
-  MA: 'Massachusetts', MI: 'Michigan', MN: 'Minnesota', MS: 'Mississippi', MO: 'Missouri',
-  MT: 'Montana', NE: 'Nebraska', NV: 'Nevada', NH: 'New Hampshire', NJ: 'New Jersey',
-  NM: 'New Mexico', NY: 'New York', NC: 'North Carolina', ND: 'North Dakota', OH: 'Ohio',
-  OK: 'Oklahoma', OR: 'Oregon', PA: 'Pennsylvania', RI: 'Rhode Island', SC: 'South Carolina',
-  SD: 'South Dakota', TN: 'Tennessee', TX: 'Texas', UT: 'Utah', VT: 'Vermont',
-  VA: 'Virginia', WA: 'Washington', WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming',
-  DC: 'District of Columbia',
-};
-
-function toFullStateName(value: string): string {
-  return STATE_NAMES[value.toUpperCase()] ?? value;
-}
 
 async function selectNgSelectByIndex(page: Page, index: number, value: string): Promise<boolean> {
   const selects = page.locator('ng-select');
@@ -62,10 +44,6 @@ async function selectNgSelectByIndex(page: Page, index: number, value: string): 
 
   await page.keyboard.press('Escape').catch(() => {});
   return false;
-}
-
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**
@@ -263,4 +241,85 @@ async function buildPreviewPdf(page: Page, filename: string): Promise<string> {
   await previewPage.close().catch(() => {});
   logger.info(`Downloaded certificate PDF: ${filePath}`);
   return filePath;
+}
+
+/**
+ * Selects an option from an ng-select multi-option dropdown by partial text match.
+ * Does NOT filter via the search input because NowCerts policy dropdowns
+ * only match from the start of the text (policy number), not by LOB name.
+ * Instead opens the dropdown and clicks the option containing the value.
+ */
+export async function selectNgMultiOption(page: Page, index: number, value: string): Promise<boolean> {
+  const selects = page.locator('ng-select');
+  if (await selects.count() <= index) return false;
+
+  const select = selects.nth(index);
+  await select.click({ force: true });
+  await page.waitForTimeout(600);
+
+  const option = page.locator('ng-dropdown-panel .ng-option').filter({
+    hasText: new RegExp(escapeRegex(value), 'i'),
+  }).first();
+
+  if (await option.count() === 0) {
+    await page.keyboard.press('Escape').catch(() => {});
+    return false;
+  }
+
+  await option.click({ force: true });
+  await page.waitForTimeout(300);
+  return true;
+}
+
+/**
+ * Maps a policy type code to the row label shown in the
+ * "Additional Interest for Certificates" table.
+ * EXL = "Umbrella Liability" (not "Excess") — confirmed live 2026-03-13.
+ */
+export function policyLineLabel(policy: string): string {
+  const map: Record<string, string> = {
+    AL: 'Automobile Liability',
+    NTL: 'Automobile Liability',
+    GL: 'General Liability',
+    WC: 'Workers Compensation',
+    MTC: 'Cargo',
+    APD: 'Physical Damage',
+    EXL: 'Umbrella Liability',
+  };
+  return map[policy.toUpperCase()] ?? policy;
+}
+
+/**
+ * Maps a policy type code to the label used in the policy-selection dropdown
+ * (ng-select) when assigning policies to a holder.
+ */
+export function policySelectionLabel(policy: string): string {
+  const map: Record<string, string> = {
+    AL: 'Commercial Auto',
+    NTL: 'Commercial Auto',
+    GL: 'General Liability',
+    WC: "Worker's Compensation",
+    MTC: 'Cargo',
+    APD: 'Physical Damage',
+    EXL: 'Umbrella',
+  };
+  return map[policy.toUpperCase()] ?? policyLineLabel(policy);
+}
+
+/**
+ * Returns the SUBR WVD (Waiver of Subrogation) checkbox Locator for a given policy row.
+ * Synchronous — returns a Playwright Locator (no await needed).
+ */
+export function wosCheckbox(page: Page, policy: string): Locator {
+  const key = policy.toUpperCase();
+  if (key === 'WC') {
+    // WC row only has one checkbox: #workersCompensationSubrWvd (confirmed live)
+    return page.locator('#workersCompensationSubrWvd').first();
+  }
+
+  // For GL/AL/EXL: SUBR WVD is the 2nd checkbox (id="") in the row.
+  // Row label confirmed live: GL="General Liability", AL="Automobile Liability", EXL="Umbrella Liability"
+  const label = policyLineLabel(policy);
+  const row = page.locator('table tr').filter({ hasText: new RegExp(`^\\s*${escapeRegex(label)}\\s*$`, 'i') }).first();
+  return row.locator('input[type="checkbox"]').nth(1);
 }
