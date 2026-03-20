@@ -2,33 +2,7 @@ import { Page } from 'playwright';
 import { AddAIAndWOSCommand, ActionResult } from '../types';
 import { logger } from '../utils/logger';
 import { ok, fail, waitForSaveConfirmation, todayYYYYMMdd, safeFilenamePart } from './_base';
-import { openAdditionalInterestInsert, searchOrCreateHolder, downloadCertificate } from './_holderHelpers';
-
-async function selectNgMultiOption(page: Page, index: number, value: string): Promise<boolean> {
-  const selects = page.locator('ng-select');
-  if (await selects.count() <= index) return false;
-
-  const select = selects.nth(index);
-  await select.click({ force: true });
-  await page.waitForTimeout(600);
-
-  const option = page.locator('ng-dropdown-panel .ng-option').filter({
-    hasText: new RegExp(escapeRegex(value), 'i'),
-  }).first();
-
-  if (await option.count() === 0) {
-    await page.keyboard.press('Escape').catch(() => {});
-    return false;
-  }
-
-  await option.click({ force: true });
-  await page.waitForTimeout(300);
-  return true;
-}
-
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
+import { openAdditionalInterestInsert, searchOrCreateHolder, downloadCertificate, selectNgMultiOption, policyLineLabel, policySelectionLabel, wosCheckbox } from './_holderHelpers';
 
 /**
  * ADD ADDITIONAL INSURED & WAIVER OF SUBROGATION
@@ -102,34 +76,6 @@ export async function addAIandWOS(
   }
 }
 
-function policyLineLabel(policy: string): string {
-  // Must match exact row text in the "Additional Interest for Certificates" table.
-  // EXL = "Umbrella Liability" (not "Excess") — confirmed live 2026-03-13.
-  const map: Record<string, string> = {
-    AL: 'Automobile Liability',
-    NTL: 'Automobile Liability',
-    GL: 'General Liability',
-    WC: 'Workers Compensation',
-    MTC: 'Cargo',
-    APD: 'Physical Damage',
-    EXL: 'Umbrella Liability',
-  };
-  return map[policy.toUpperCase()] ?? policy;
-}
-
-function policySelectionLabel(policy: string): string {
-  const map: Record<string, string> = {
-    AL: 'Commercial Auto',
-    NTL: 'Commercial Auto',
-    GL: 'General Liability',
-    WC: "Worker's Compensation",
-    MTC: 'Cargo',
-    APD: 'Physical Damage',
-    EXL: 'Umbrella',
-  };
-  return map[policy.toUpperCase()] ?? policyLineLabel(policy);
-}
-
 function aiCheckbox(page: Page, policy: string) {
   const map: Record<string, string> = {
     AL: '#automobileLiability',
@@ -141,18 +87,4 @@ function aiCheckbox(page: Page, policy: string) {
 
   const row = page.locator('tr').filter({ hasText: new RegExp(policyLineLabel(policy), 'i') }).first();
   return row.locator('input[type="checkbox"]').first();
-}
-
-function wosCheckbox(page: Page, policy: string) {
-  const key = policy.toUpperCase();
-  if (key === 'WC') {
-    // WC row only has one checkbox: #workersCompensationSubrWvd (confirmed live)
-    return page.locator('#workersCompensationSubrWvd').first();
-  }
-
-  // For GL/AL/EXL: SUBR WVD is the 2nd checkbox (id="") in the row.
-  // Row label confirmed live: GL="General Liability", AL="Automobile Liability", EXL="Umbrella Liability"
-  const label = policyLineLabel(policy);
-  const row = page.locator('table tr').filter({ hasText: new RegExp(`^\\s*${escapeRegex(label)}\\s*$`, 'i') }).first();
-  return row.locator('input[type="checkbox"]').nth(1);
 }

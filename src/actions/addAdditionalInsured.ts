@@ -2,39 +2,7 @@ import { Page } from 'playwright';
 import { AddAdditionalInsuredCommand, ActionResult } from '../types';
 import { logger } from '../utils/logger';
 import { ok, fail, waitForSaveConfirmation, todayYYYYMMdd, safeFilenamePart } from './_base';
-import { openAdditionalInterestInsert, searchOrCreateHolder, downloadCertificate } from './_holderHelpers';
-
-/**
- * Selects an option from an ng-select dropdown by partial text match.
- * Does NOT filter via the search input because NowCerts policy dropdowns
- * only match from the start of the text (policy number), not by LOB name.
- * Instead opens the dropdown and clicks the option containing the value.
- */
-async function selectNgMultiOption(page: Page, index: number, value: string): Promise<boolean> {
-  const selects = page.locator('ng-select');
-  if (await selects.count() <= index) return false;
-
-  const select = selects.nth(index);
-  await select.click({ force: true });
-  await page.waitForTimeout(600);
-
-  const option = page.locator('ng-dropdown-panel .ng-option').filter({
-    hasText: new RegExp(escapeRegex(value), 'i'),
-  }).first();
-
-  if (await option.count() === 0) {
-    await page.keyboard.press('Escape').catch(() => {});
-    return false;
-  }
-
-  await option.click({ force: true });
-  await page.waitForTimeout(300);
-  return true;
-}
-
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
+import { openAdditionalInterestInsert, searchOrCreateHolder, downloadCertificate, selectNgMultiOption, policySelectionLabel } from './_holderHelpers';
 
 /**
  * ADD ADDITIONAL INSURED to AL/GL (or combinations)
@@ -118,18 +86,6 @@ export async function addAdditionalInsured(
   }
 }
 
-function policyLineLabel(policy: string): string {
-  const map: Record<string, string> = {
-    AL: 'Automobile Liability',
-    GL: 'General Liability',
-    WC: 'Workers Compensation',
-    MTC: 'Cargo',
-    APD: 'Physical Damage',
-    EXL: 'Excess',
-  };
-  return map[policy.toUpperCase()] ?? policy;
-}
-
 function aiCheckboxId(policy: string): string | null {
   const map: Record<string, string> = {
     AL: 'automobileLiability',
@@ -137,17 +93,4 @@ function aiCheckboxId(policy: string): string | null {
     EXL: 'umbrellaLiability',
   };
   return map[policy.toUpperCase()] ?? null;
-}
-
-function policySelectionLabel(policy: string): string {
-  const map: Record<string, string> = {
-    AL: 'Commercial Auto',
-    NTL: 'Commercial Auto',
-    GL: 'General Liability',
-    WC: "Worker's Compensation",
-    MTC: 'Cargo',
-    APD: 'Physical Damage',
-    EXL: 'Umbrella',
-  };
-  return map[policy.toUpperCase()] ?? policyLineLabel(policy);
 }
