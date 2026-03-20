@@ -1,7 +1,14 @@
 import { Page } from 'playwright';
 import { AddPolicyCommand, ActionResult } from '../types';
 import { logger } from '../utils/logger';
-import { fail, ok, waitForSaveConfirmation, getInsuredUrl } from './_base';
+import { fail, ok, waitForSaveConfirmation, getInsuredUrl, escapeRegex, toDigits, byIdEndsWith } from './_base';
+import {
+  COVERAGES_VIEW, COVERAGES_ARROW, COVERAGES_REFRESH, COVERAGES_DROPDOWN, AL_SECTION_CHECKBOX,
+  selectRadComboByText, setCheckboxById, ensureControlExists,
+  fillCoverageText, waitForControlAttached, openCoveragesView,
+  selectCoverageSection, refreshCoverageSections,
+  enableAutomobileLiabilityCoverage,
+} from './_policyHelpers';
 
 const POLICY_ADD_NEW = 'a[href*="Policies/Insert.aspx"][href*="TruckingCompanyId"]';
 const POLICY_NUMBER = '#ContentPlaceHolder1_FormView1_ctl01_ctl00___Number_TextBox1';
@@ -12,15 +19,8 @@ const CARRIER_INPUT = '#ctl00_ContentPlaceHolder1_FormView1_ctl01_ctl11___Trucki
 const MGA_INPUT = '#ctl00_ContentPlaceHolder1_FormView1_ctl01_ctl12___TruckingCompany2_ddlUnderwriters_Input';
 const LOB_INPUT = '#ctl00_ContentPlaceHolder1_FormView1_ctl01_ctl23___LinesOfBusinessAndFees_rptLinesOfBusiness_ctl00_usrLineOfBusiness_ddlLineOfBusinesses_Input';
 const LOB_ADD = '#ctl00_ContentPlaceHolder1_FormView1_ctl01_ctl23___LinesOfBusinessAndFees_rptLinesOfBusiness_ctl00_lnkAddNew';
-const COVERAGES_VIEW = 'div.ibox:has(h4:text-is("Coverages")) span.label.state';
-const COVERAGES_ARROW = '#ctl00_ContentPlaceHolder1_FormView1_ctl01_ctl23___LinesOfBusinessAndFees_rptManageCoverages_ctl00_usrCoveragesSelector_ddlCoveragesSections_Arrow';
-const COVERAGES_REFRESH = '#ctl00_ContentPlaceHolder1_FormView1_ctl01_ctl23___LinesOfBusinessAndFees_btnRefreshSections';
-const COVERAGES_DROPDOWN = '#ctl00_ContentPlaceHolder1_FormView1_ctl01_ctl23___LinesOfBusinessAndFees_rptManageCoverages_ctl00_usrCoveragesSelector_ddlCoveragesSections_DropDown li';
-const COVERAGES_INPUT = '#ctl00_ContentPlaceHolder1_FormView1_ctl01_ctl23___LinesOfBusinessAndFees_rptManageCoverages_ctl00_usrCoveragesSelector_ddlCoveragesSections_Input';
-const COVERAGES_CLIENT_STATE = '#ctl00_ContentPlaceHolder1_FormView1_ctl01_ctl23___LinesOfBusinessAndFees_rptManageCoverages_ctl00_usrCoveragesSelector_ddlCoveragesSections_ClientState';
 const CSL_ARROW = '#ctl00_ContentPlaceHolder1_FormView1_ctl01_ctl23___LinesOfBusinessAndFees_usrPolicyCoverages123_rcbLimitLiabilityCSL_Arrow';
 const CSL_INPUT = '#ctl00_ContentPlaceHolder1_FormView1_ctl01_ctl23___LinesOfBusinessAndFees_usrPolicyCoverages123_rcbLimitLiabilityCSL_Input';
-const AL_SECTION_CHECKBOX = '[id$="automobileLiability_cbAutomobileLiability"]';
 const AL_COMBINED_SINGLE = '[id$="automobileLiability_txtCombinedSingle"]';
 const SAVE_BUTTON = '#btnInsert_SaveChanges';
 const MASTER_POLICIES_ARROW = '#ctl00_ContentPlaceHolder1_usrPoliciesMultiSelector_ddlPolicies_Arrow';
@@ -57,59 +57,6 @@ const COVERAGE_SECTION_NAMES: Record<string, string> = {
   EXL: 'Excess/Umbrella Liability',
 };
 
-function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function byIdEndsWith(suffix: string): string {
-  return `[id$="${suffix}"]`;
-}
-
-function toDigits(value?: string): string {
-  return (value ?? '').replace(/[^\d]/g, '');
-}
-
-async function selectRadComboByText(page: Page, arrowSelector: string, text: string): Promise<boolean> {
-  const arrow = page.locator(arrowSelector).first();
-  if (await arrow.count() === 0) return false;
-
-  for (let attempt = 0; attempt < 3; attempt++) {
-    await arrow.click({ force: true }).catch(async () => {
-      await arrow.evaluate((el: any) => el.click());
-    });
-    await page.waitForTimeout(1000); // Allow combo list to render
-
-    const exact = page.locator('li.rcbItem, li.rcbHovered, .rcbList li').filter({
-      hasText: new RegExp(`^${escapeRegex(text)}$`, 'i'),
-    }).first();
-    const partial = page.locator('li.rcbItem, li.rcbHovered, .rcbList li').filter({
-      hasText: new RegExp(escapeRegex(text), 'i'),
-    }).first();
-
-    if (await exact.count() > 0 && await exact.isVisible().catch(() => false)) {
-      await exact.click({ force: true }).catch(async () => {
-        await exact.evaluate((el: any) => el.click());
-      });
-      await page.waitForTimeout(500);
-      return true;
-    }
-
-    if (await partial.count() > 0 && await partial.isVisible().catch(() => false)) {
-      await partial.click({ force: true }).catch(async () => {
-        await partial.evaluate((el: any) => el.click());
-      });
-      await page.waitForTimeout(500);
-      return true;
-    }
-
-    // Attempt failed, close it cleanly for next attempt
-    await page.keyboard.press('Escape').catch(() => {});
-    await page.waitForTimeout(500);
-  }
-
-  return false;
-}
-
 async function clickPoliciesAddNew(page: Page): Promise<void> {
   const policiesUrl = getInsuredUrl(page, 'Policies');
   await page.goto(policiesUrl, { waitUntil: 'domcontentloaded' });
@@ -124,7 +71,7 @@ async function clickPoliciesAddNew(page: Page): Promise<void> {
 
 async function chooseLOB(page: Page, lobName: string): Promise<void> {
   const lobInput = page.locator(LOB_INPUT).first();
-  
+
   for (let attempt = 0; attempt < 3; attempt++) {
     await lobInput.fill(''); // Clear input explicitly
     await page.waitForTimeout(300);
@@ -157,7 +104,7 @@ async function chooseLOB(page: Page, lobName: string): Promise<void> {
         return;
       }
     }
-    
+
     // Attempt failed, try to close dropdown and retry
     await page.keyboard.press('Escape').catch(() => {});
     await page.waitForTimeout(500);
@@ -166,172 +113,11 @@ async function chooseLOB(page: Page, lobName: string): Promise<void> {
   throw new Error(`LOB not found or failed to select in dropdown: ${lobName}`);
 }
 
-async function openCoveragesView(page: Page): Promise<void> {
-  const view = page.locator(COVERAGES_VIEW).filter({ hasText: /^View$/i }).first();
-  if (await view.count() > 0) {
-    await view.click({ force: true }).catch(async () => {
-      await view.evaluate((el: any) => el.click());
-    });
-    await page.waitForTimeout(1500);
-  }
-}
-
-async function selectCoverageSection(page: Page, sectionName: string): Promise<void> {
-  // Open the dropdown arrow
-  const arrow = page.locator(COVERAGES_ARROW).first();
-  await arrow.click({ force: true }).catch(async () => {
-    await arrow.evaluate((el: any) => el.click());
-  });
-  await page.waitForTimeout(1200);
-
-  // Use pure DOM evaluate — isVisible() is unreliable for RadComboBox items.
-  // Find the li whose text starts with sectionName and ensure its checkbox is checked.
-  const result = await page.evaluate((name: string) => {
-    const doc = (globalThis as any).document;
-    const items: any[] = Array.from(
-      doc.querySelectorAll(
-        '#ctl00_ContentPlaceHolder1_FormView1_ctl01_ctl23___LinesOfBusinessAndFees_rptManageCoverages_ctl00_usrCoveragesSelector_ddlCoveragesSections_DropDown li'
-      )
-    );
-    const lower = name.toLowerCase();
-    const target = items.find((li: any) => {
-      const t = (li.textContent || '').toLowerCase();
-      return t.startsWith(lower) || t.includes(lower);
-    });
-    if (!target) return { found: false, texts: items.map((li: any) => (li.textContent || '').trim()) };
-    const cb: any = target.querySelector('input[type="checkbox"]');
-    if (cb && !cb.checked) cb.click();
-    return { found: true, alreadyChecked: !!(cb && cb.checked) };
-  }, sectionName);
-
-  if (!result.found) {
-    logger.warn(`Coverage section not found: ${sectionName}. Available: ${(result as any).texts?.join(' | ')}`);
-    // Close dropdown and throw
-    await page.keyboard.press('Escape').catch(() => {});
-    await page.waitForTimeout(300);
-    throw new Error(`Coverage section not found: ${sectionName}`);
-  }
-
-  logger.info(`Coverage section "${sectionName}" selected (alreadyChecked=${(result as any).alreadyChecked})`);
-
-  // Close the dropdown
-  await page.keyboard.press('Escape').catch(() => {});
-  await page.waitForTimeout(300);
-}
-
-async function refreshCoverageSections(page: Page): Promise<void> {
-  await page.locator(COVERAGES_REFRESH).evaluate((el: any) => el.click());
-  await page.waitForTimeout(2500);
-}
-
-async function waitForControlAttached(page: Page, selector: string, timeout = 10000): Promise<boolean> {
-  return await page.waitForFunction(
-    (sel) => {
-      const doc = (globalThis as any).document;
-      return !!doc?.querySelector?.(sel);
-    },
-    selector,
-    { timeout }
-  ).then(() => true).catch(() => false);
-}
-
-async function ensureControlExists(page: Page, selector: string): Promise<void> {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const input = page.locator(selector).first();
-    if (await input.count() > 0) {
-      return;
-    }
-
-    await openCoveragesView(page);
-    await page.waitForTimeout(900);
-  }
-
-  const input = page.locator(selector).first();
-  if (await input.count() === 0) {
-    throw new Error(`Control not found: ${selector}`);
-  }
-}
-
-async function setCheckboxById(page: Page, selector: string, checked: boolean): Promise<void> {
-  await ensureControlExists(page, selector);
-  const input = page.locator(selector).first();
-
-  const current = await input.isChecked().catch(() => false);
-  if (current === checked) return;
-
-  if (selector.startsWith('#')) {
-    const label = page.locator(`label[for="${selector.slice(1)}"]`).first();
-    if (await label.count() > 0 && await label.isVisible().catch(() => false)) {
-      await label.click({ force: true }).catch(async () => {
-        await label.evaluate((el: any) => el.click());
-      });
-      await page.waitForTimeout(200);
-      return;
-    }
-  }
-
-  await input.evaluate((el: any) => el.click());
-  await page.waitForTimeout(200);
-}
-
-async function fillCoverageText(page: Page, selector: string, value?: string): Promise<void> {
-  if (!value) return;
-  await ensureControlExists(page, selector);
-  const input = page.locator(selector).first();
-  const formatted = Number(toDigits(value)).toLocaleString('en-US');
-  if (await input.isVisible().catch(() => false)) {
-    await input.fill(formatted);
-  } else {
-    await input.evaluate((el: any, nextValue: string) => {
-      el.value = nextValue;
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-    }, formatted);
-  }
-  await page.waitForTimeout(150);
-}
-
-async function enableAutomobileLiabilityCoverage(page: Page): Promise<void> {
-  const alreadyAttached = await waitForControlAttached(page, AL_SECTION_CHECKBOX, 4000);
-
-  if (!alreadyAttached) {
-    await page.locator(COVERAGES_ARROW).click({ force: true }).catch(async () => {
-      await page.locator(COVERAGES_ARROW).evaluate((el: any) => el.click());
-    });
-    await page.waitForTimeout(500);
-
-    const row = page.locator(`${COVERAGES_DROPDOWN}`).filter({ hasText: /^Automobile Liability -/i }).first();
-    await row.locator('input[type="checkbox"]').evaluate((el: any) => el.click());
-    await page.waitForTimeout(500);
-
-    await page.locator(COVERAGES_ARROW).click({ force: true }).catch(async () => {
-      await page.locator(COVERAGES_ARROW).evaluate((el: any) => el.click());
-    });
-    await page.waitForTimeout(300);
-    await page.locator(COVERAGES_REFRESH).evaluate((el: any) => el.click());
-    await page.waitForTimeout(2500);
-  }
-
-  const attached = await waitForControlAttached(page, AL_SECTION_CHECKBOX, 10000);
-  if (!attached) {
-    throw new Error('Automobile Liability section did not appear after coverage refresh');
-  }
-
-  const autoSection = page.locator(AL_SECTION_CHECKBOX).first();
-  await autoSection.evaluate((el: any) => el.click());
-  await page.waitForTimeout(1200);
-}
-
-async function setChecked(page: Page, selector: string, value: boolean): Promise<void> {
-  if (!value) return;
-  await setCheckboxById(page, selector, true);
-}
-
 async function fillAutomobileLiability(page: Page, cmd: AddPolicyCommand): Promise<void> {
-  await setChecked(page, byIdEndsWith('automobileLiability_cbAnyAuto'), !!cmd.anyAuto);
-  await setChecked(page, byIdEndsWith('automobileLiability_cbAllOwnedAutos'), !!cmd.allOwnedAutos);
-  await setChecked(page, byIdEndsWith('automobileLiability_cbScheduledAutos'), !!cmd.scheduledAutos);
-  await setChecked(page, byIdEndsWith('automobileLiability_cbHiredAutos'), !!cmd.hiredAutos);
+  if (cmd.anyAuto) await setCheckboxById(page, byIdEndsWith('automobileLiability_cbAnyAuto'), true);
+  if (cmd.allOwnedAutos) await setCheckboxById(page, byIdEndsWith('automobileLiability_cbAllOwnedAutos'), true);
+  if (cmd.scheduledAutos) await setCheckboxById(page, byIdEndsWith('automobileLiability_cbScheduledAutos'), true);
+  if (cmd.hiredAutos) await setCheckboxById(page, byIdEndsWith('automobileLiability_cbHiredAutos'), true);
 
   if (cmd.policyType === 'NTL') {
     // NTL: NON-OWNED AUTOS must be UNCHECKED.
@@ -341,7 +127,7 @@ async function fillAutomobileLiability(page: Page, cmd: AddPolicyCommand): Promi
     // txtOther1CoverageAutomobileLiability — this is how the manual shows it.
     await setCheckboxById(page, byIdEndsWith('automobileLiability_cbNonOwnedAutos'), false);
 
-    await setChecked(page, byIdEndsWith('automobileLiability_cbOther1CoverageAutomobileLiability'), true);
+    await setCheckboxById(page, byIdEndsWith('automobileLiability_cbOther1CoverageAutomobileLiability'), true);
     await page.waitForTimeout(300);
 
     const other1Text = page.locator(byIdEndsWith('automobileLiability_txtOther1CoverageAutomobileLiability')).first();
@@ -359,7 +145,7 @@ async function fillAutomobileLiability(page: Page, cmd: AddPolicyCommand): Promi
   } else {
     // AL and other types: respect the nonOwnedAutos flag from the parsed email
     if (cmd.nonOwnedAutos) {
-      await setChecked(page, byIdEndsWith('automobileLiability_cbNonOwnedAutos'), true);
+      await setCheckboxById(page, byIdEndsWith('automobileLiability_cbNonOwnedAutos'), true);
     }
   }
 
@@ -399,9 +185,21 @@ async function fillGeneralLiability(page: Page, cmd: AddPolicyCommand): Promise<
   await fillCoverageText(page, byIdEndsWith('generalLiability_txtProducts'), cmd.productsCompOpAgg);
 
   if (cmd.deductible) {
-    await setCheckboxById(page, byIdEndsWith('generalLiability_cbOther1CoverageGeneralLiability'), true);
-    await page.locator(byIdEndsWith('generalLiability_txtOther1CoverageGeneralLiability')).first().fill('Deductible');
-    await fillCoverageText(page, byIdEndsWith('generalLiability_txtOther1LimitsGeneralLiability'), cmd.deductible);
+    // Label "Deductible" as text (not numeric) in Other1 Limits
+    await ensureControlExists(page, byIdEndsWith('generalLiability_txtOther1LimitsGeneralLiability'));
+    const labelInput = page.locator(byIdEndsWith('generalLiability_txtOther1LimitsGeneralLiability')).first();
+    if (await labelInput.isVisible().catch(() => false)) {
+      await labelInput.fill('Deductible');
+    } else {
+      await labelInput.evaluate((el: any) => {
+        el.value = 'Deductible';
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+    }
+    await page.waitForTimeout(150);
+    // Deductible value in Other2 Limits
+    await fillCoverageText(page, byIdEndsWith('generalLiability_txtOther2LimitsGeneralLiability'), cmd.deductible);
   }
 }
 
@@ -416,9 +214,6 @@ async function fillWorkersComp(page: Page, cmd: AddPolicyCommand): Promise<void>
 }
 
 function assertValidatedCoverageSupport(cmd: AddPolicyCommand): void {
-  if (cmd.policyType === 'APD' && cmd.deductible) {
-    throw new Error('APD comprehensive/collision deductible fields are still not validated live in NowCerts.');
-  }
   if (cmd.policyType === 'EXL' && (cmd.eachOccurrence || cmd.aggregate)) {
     throw new Error('EXL occurrence/aggregate fields are still not validated live in NowCerts.');
   }
@@ -432,8 +227,12 @@ async function assignPolicyToMasterCertificate(page: Page, certificatesUrl: stri
     has: page.locator('button, a, span').filter({ hasText: /Actions/i }),
   });
   const count = await certRows.count();
-  if (count !== 1) {
-    throw new Error(`Expected exactly 1 master certificate row, found ${count}`);
+  if (count === 0) {
+    logger.info('No master certificate found — skipping policy assignment to master');
+    return;
+  }
+  if (count > 1) {
+    logger.warn(`Found ${count} master certificate rows — using the first one`);
   }
 
   const row = certRows.first();
@@ -494,6 +293,24 @@ async function validateSupportedPolicy(cmd: AddPolicyCommand): Promise<void> {
   }
 }
 
+async function fillPhysicalDamage(page: Page, cmd: AddPolicyCommand): Promise<void> {
+  // Enable Physical Damage section
+  await setCheckboxById(page, byIdEndsWith('PhisycalDamage_cbPhisycalDamage'), true);
+  await page.waitForTimeout(500);
+
+  // Set coverage type to "Comprehensive" (default for APD)
+  const coverageArrow = byIdEndsWith('PhisycalDamage_ddlPhisycalDamageCoverage_Arrow');
+  await selectRadComboByText(page, coverageArrow, 'Comprehensive').catch(() => {
+    logger.warn('Could not select Comprehensive in Physical Damage dropdown');
+  });
+
+  // Fill deductible values
+  if (cmd.deductible) {
+    await fillCoverageText(page, byIdEndsWith('PhisycalDamage_txtPhisycalDamageCoverage'), cmd.deductible);
+    await fillCoverageText(page, byIdEndsWith('PhisycalDamage_txtPhisycalDamageLimit'), cmd.deductible);
+  }
+}
+
 export async function addPolicy(page: Page, cmd: AddPolicyCommand): Promise<ActionResult> {
   logger.info(`addPolicy: ${cmd.policyType} #${cmd.policyNumber}`);
 
@@ -512,10 +329,28 @@ export async function addPolicy(page: Page, cmd: AddPolicyCommand): Promise<Acti
     const businessType = BUSINESS_TYPE_NAMES[cmd.policyType] ?? 'New Business';
     await selectRadComboByText(page, BUSINESS_TYPE_ARROW, businessType);
 
+    // Carrier: type to filter and select from RadComboBox dropdown
     await page.fill(CARRIER_INPUT, cmd.carrier);
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(1000);
+    const carrierDropdown = page.locator(`${CARRIER_INPUT.replace('_Input', '_DropDown')} li.rcbItem`);
+    const carrierOption = carrierDropdown.filter({ hasText: new RegExp(escapeRegex(cmd.carrier), 'i') }).first();
+    if (await carrierOption.count() > 0 && await carrierOption.isVisible().catch(() => false)) {
+      await carrierOption.click({ force: true });
+      await page.waitForTimeout(500);
+    }
+
+    // MGA: type to filter and select from RadComboBox dropdown
     await page.fill(MGA_INPUT, cmd.mga);
-    await page.waitForTimeout(800);
+    await page.waitForTimeout(1000);
+    const mgaDropdown = page.locator(`${MGA_INPUT.replace('_Input', '_DropDown')} li.rcbItem`);
+    const mgaOption = mgaDropdown.filter({ hasText: new RegExp(escapeRegex(cmd.mga), 'i') }).first();
+    if (await mgaOption.count() > 0 && await mgaOption.isVisible().catch(() => false)) {
+      await mgaOption.click({ force: true });
+      await page.waitForTimeout(500);
+    } else {
+      logger.warn(`MGA option not found in dropdown for: "${cmd.mga}"`);
+    }
+    await page.waitForTimeout(500);
 
     await page.evaluate(() => {
       const g = globalThis as any;
@@ -545,6 +380,10 @@ export async function addPolicy(page: Page, cmd: AddPolicyCommand): Promise<Acti
 
     if (cmd.policyType === 'WC') {
       await fillWorkersComp(page, cmd);
+    }
+
+    if (cmd.policyType === 'APD') {
+      await fillPhysicalDamage(page, cmd);
     }
 
     const cslValue = await page.locator(CSL_INPUT).inputValue().catch(() => '');
