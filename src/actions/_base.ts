@@ -75,15 +75,18 @@ export function todayYYYYMMdd(): string {
 }
 
 /**
- * Removes trailing period, year range (e.g. "2026 - 2027"), and DBA text from a client name field.
- * Used when editing certificates/ID cards.
+ * Cleans a client name for certificates/ID cards.
+ * Removes trailing period, year range (e.g. "2026 - 2027"),
+ * and empty "DBA:" with no content. Keeps DBA if it has actual content.
  */
 export function cleanClientName(raw: string): string {
   let name = raw.trim();
   // Remove trailing period
   name = name.replace(/\.\s*$/, '').trim();
-  // Remove year range like "2026 - 2027" anywhere in the string (keep DBA)
+  // Remove year range like "2026 - 2027" anywhere in the string
   name = name.replace(/\s+\d{4}\s*-\s*\d{4}/, '').trim();
+  // Remove empty "DBA:" or "DBA" with no content after it
+  name = name.replace(/\s+DBA:?\s*$/i, '').trim();
   return name;
 }
 

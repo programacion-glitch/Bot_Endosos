@@ -20,7 +20,7 @@ import { logger } from '../utils/logger';
 //   TIPO // ClientName // DBA SomeName
 //   TIPO // ClientName // USDOT 123456 // DBA SomeName
 const SUBJECT_USDOT_RE = /USDOT\s+([A-Z0-9]+)/i;
-const SUBJECT_DBA_RE = /\bDBA\s+([^/]+)/i;
+const SUBJECT_DBA_RE = /\bDBA:?\s+([^/]+)/i;
 
 function parseSubject(subject: string): { clientName?: string; usdot?: string; dba?: string } {
   const usdotMatch = subject.match(SUBJECT_USDOT_RE);
@@ -35,10 +35,10 @@ function parseSubject(subject: string): { clientName?: string; usdot?: string; d
   namePart = namePart.replace(/USDOT\s+[A-Z0-9]+/i, '');
 
   // 2. Remove DBA and its value
-  namePart = namePart.replace(/\bDBA\s+[^/]+/i, '');
+  namePart = namePart.replace(/\bDBA:?\s+[^/]+/i, '');
 
   // 3. Remove prefixes/suffixes anywhere in the string
-  namePart = namePart.replace(/\b(BOT-END|END-BOT|DOCUMENTAR\s+CLIENTE|EFFECTIVE\s+DATE\s+[\d\/]+)\b/gi, '');
+  namePart = namePart.replace(/\b(BOT-END|END-BOT|BOT-DOCUMENTAR|EFFECTIVE\s+DATE\s+[\d\/]+)\b/gi, '');
 
   // 4. Clean up the slashes and trim
   namePart = namePart.replace(/\s*\/\/\s*/g, ' ').replace(/\s+/g, ' ').trim();
@@ -82,7 +82,7 @@ function detectSendTo(body: string): string | undefined {
 // 2. A blank line followed by a line starting with a known command keyword
 
 /** Patterns that mark the start of a new command block */
-const COMMAND_START_RE = /^(?:Create\s+Insured|Create\s+Master|Add\s+(?:Vehicle|Trailer|Driver|Additional\s+Insured|Waiver\s+of\s+Subrogation|Note\s+to|Loss\s+Payee|Policy)|Remove\s+(?:Vehicle|Trailer|Driver)|Update\s+(?:Holder|LP\s+Holder|limit\/deductible|mailing\s+address|Vehicle|Policy\s+Number)|Delete\s+Vehicle|No\s+Change)\b/i;
+const COMMAND_START_RE = /^(?:Create\s+Insured|Create\s+Master|Add\s+(?:Vehicle|Trailer|Driver|Additional\s+Insured|Waiver\s+of\s+Subrogation|Note\s+to|Loss\s+Payee|Policy)|Remove\s+(?:Vehicle|Trailer|Driver)|Update\s+(?:Holder|LP\s+Holder|limit\/deductible|limit|deductible|mailing\s+address|Vehicle|Policy\s+Number)|Delete\s+Vehicle|No\s+Change|Type:\s*(?:Tractor|Truck|Trailer))\b/i;
 
 function splitCommandBlocks(body: string): string[] {
   // First try legacy "x" / "xx" separator
@@ -200,12 +200,14 @@ function parseBlock(block: string): Command | null {
   //   Add Vehicle/Trailer VIN#: ### // Year: YYYY // Description: NNNN // Value: $#,### // Effective Date: M/d/YYYY
   //   Add Vehicle: VIN# ### // Year: YYYY // Description: NNNN
   //   Add Trailer: VIN# ### // Year: YYYY // Description: NNNN
-  if (/^Add\s+(?:Vehicle\/Trailer|Vehicle|Trailer)\b/i.test(firstLine)) {
-    // Try both "VIN#: XXX" and "VIN# XXX" (with or without colon)
-    const vinM = firstLine.match(/VIN#:?\s*([\w]+)/i);
-    const yearM = firstLine.match(/Year:\s*(\d{4})/i);
-    const descM = firstLine.match(/Description:\s*([^/]+)/i);
-    const valueM = firstLine.match(/Value:\s*(\$[\d,]+[^/]*)/i);
+  //   Type: Tractor Truck // VIN Number: ### // Year: YYYY // ...  (implicit add)
+  if (/^(?:Add\s+(?:Vehicle\/Trailer|Vehicle|Trailer)|Type:\s*(?:Tractor\s+Truck|Truck|Trailer))\b/i.test(firstLine)) {
+    // Try single-line first, then fall back to multi-line block parsing
+    const vinRe = /(?:VIN(?:#|\s+Number):?\s*)([\w]+)/i;
+    const vinM = firstLine.match(vinRe) ?? block.match(vinRe);
+    const yearM = firstLine.match(/Year:\s*(\d{1,2},?\d{3}|\d{4})/i) ?? block.match(/Year:\s*(\d{1,2},?\d{3}|\d{4})/i);
+    const descM = firstLine.match(/Description:\s*([^/\n]+)/i) ?? block.match(/Description:\s*([^/\n]+)/i);
+    const valueM = firstLine.match(/Value:\s*\$?([\d,]+[^/]*)/i) ?? block.match(/Value:\s*\$?([\d,]+[^/\n]*)/i);
     const effM = firstLine.match(/Effective\s*Date:\s*([\d/]+)/i)
       ?? block.match(/Effective\s*Date:\s*([\d/]+)/i);
 
@@ -213,7 +215,7 @@ function parseBlock(block: string): Command | null {
       type: 'ADD_VEHICLE',
       rawText: block,
       vin: vinM?.[1]?.trim() ?? '',
-      year: yearM?.[1]?.trim() ?? '',
+      year: (yearM?.[1] ?? '').replace(/,/g, '').trim(),
       description: descM?.[1]?.trim() ?? '',
       value: valueM?.[1]?.trim() ?? undefined,
       effectiveDate: effM?.[1]?.trim() ?? '',
@@ -222,17 +224,17 @@ function parseBlock(block: string): Command | null {
 
   // ── Remove Vehicle/Trailer ────────────────────────────────────────────────
   if (/^(?:Remove|Delete)\s+(?:Vehicle\/Trailer|Vehicle|Trailer)\b(?!\s*\/Driver)/i.test(firstLine)) {
-    const vinM = firstLine.match(/VIN#:?\s*([\w]+)/i);
-    const yearM = firstLine.match(/Year:\s*(\d{1,2},?\d{3}|\d{4})/i);
-    const descM = firstLine.match(/Description:\s*([^/]+)/i);
-    const valueM = firstLine.match(/Value:\s*(\$[\d,]+[^/]*)/i);
+    const vinM = firstLine.match(/VIN#:?\s*([\w]+)/i) ?? block.match(/VIN#:?\s*([\w]+)/i);
+    const yearM = firstLine.match(/Year:\s*(\d{1,2},?\d{3}|\d{4})/i) ?? block.match(/Year:\s*(\d{1,2},?\d{3}|\d{4})/i);
+    const descM = firstLine.match(/Description:\s*([^/\n]+)/i) ?? block.match(/Description:\s*([^/\n]+)/i);
+    const valueM = firstLine.match(/Value:\s*(\$[\d,]+[^/]*)/i) ?? block.match(/Value:\s*(\$[\d,]+[^/\n]*)/i);
     const effM = firstLine.match(/Effective\s*Date:\s*([\d/]+)/i)
       ?? block.match(/Effective\s*Date:\s*([\d/]+)/i);
     return {
       type: 'REMOVE_VEHICLE',
       rawText: block,
       vin: vinM?.[1]?.trim() ?? '',
-      year: yearM?.[1]?.trim() ?? '',
+      year: (yearM?.[1] ?? '').replace(/,/g, '').trim(),
       description: descM?.[1]?.trim() ?? '',
       value: valueM?.[1]?.trim() ?? undefined,
       effectiveDate: effM?.[1]?.trim() ?? '',
@@ -241,7 +243,19 @@ function parseBlock(block: string): Command | null {
 
   // ── Add Driver ────────────────────────────────────────────────────────────
   if (/^Add\s+Driver/i.test(firstLine)) {
-    const d = parseDriverLine(firstLine);
+    // Try single-line format first, then multi-line field extraction
+    let d = parseDriverLine(firstLine);
+    if (!d) {
+      const cdlM =
+        block.match(/CDL:\s*([\w]+)\s*\((\w{2})\)/i) ??
+        block.match(/CDL:\s*([\w]+)\s+([A-Z]{2})\b/i);
+      const firstName = field(block, 'Name');
+      const lastName = field(block, 'Last\\s*Name');
+      const dob = field(block, 'DOB');
+      if (firstName && lastName && cdlM && dob) {
+        d = { firstName, lastName, cdl: cdlM[1].trim(), cdlState: cdlM[2].trim(), dob };
+      }
+    }
     return {
       type: 'ADD_DRIVER',
       rawText: block,
@@ -381,7 +395,7 @@ function parseBlock(block: string): Command | null {
   }
 
   // ── Update limit/deductible ───────────────────────────────────────────────
-  if (/^Update\s+limit\/deductible/i.test(firstLine)) {
+  if (/^Update\s+(?:limit\/deductible|limit|deductible)/i.test(firstLine)) {
     const ptM = firstLine.match(/to\s+the\s+(AL|MTC|APD|GL|WC|EXL|NTL)/i);
     return {
       type: 'UPDATE_LIMIT_DEDUCTIBLE',

@@ -25,11 +25,16 @@ export async function addNoteToHolder(
     await searchOrCreateHolder(page, cmd.holder);
 
     if (cmd.holder.note) {
-      await page.fill('textarea[placeholder="Description of Operations"]', cmd.holder.note);
+      const descField = page.getByRole('textbox', { name: 'Description of Operations' });
+      await descField.waitFor({ state: 'visible', timeout: 10_000 });
+      await descField.fill(cmd.holder.note);
     }
 
-    await page.locator('span.btn-loading').filter({ hasText: /^Save Changes$/i }).first().click({ force: true });
+    const saveBtn = page.locator('button').filter({ hasText: /^Save Changes$/i }).first();
+    await saveBtn.waitFor({ state: 'visible', timeout: 10_000 });
+    await saveBtn.click({ force: true });
     await waitForSaveConfirmation(page);
+    await page.waitForTimeout(2000);
 
     const today = todayYYYYMMdd();
     const filename = `${today} Certificate Holder (${safeFilenamePart(cmd.holder.name)}).pdf`;

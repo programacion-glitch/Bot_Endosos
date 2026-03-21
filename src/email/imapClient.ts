@@ -46,7 +46,7 @@ async function getConnection(): Promise<ImapSimple> {
 }
 
 /** Subject prefixes the bot recognises */
-const VALID_SUBJECT_PREFIXES = ['BOT-END', 'DOCUMENTAR CLIENTE'];
+const VALID_SUBJECT_PREFIXES = ['BOT-END', 'END-BOT', 'BOT-DOCUMENTAR'];
 
 /**
  * Fetches UNSEEN emails whose subject starts with a valid prefix.
@@ -62,13 +62,13 @@ export async function fetchUnseenEmails(): Promise<RawEmail[]> {
 
   await conn.openBox(config.imap.mailbox);
 
-  // Server-side filter: UNSEEN + subject contains BOT-END or DOCUMENTAR CLIENTE
+  // Server-side filter: UNSEEN + subject contains BOT-END or BOT-DOCUMENTAR
   const messages = await conn.search(
     [
       'UNSEEN',
       ['OR',
         ['HEADER', 'SUBJECT', 'BOT-END'],
-        ['HEADER', 'SUBJECT', 'DOCUMENTAR CLIENTE'],
+        ['HEADER', 'SUBJECT', 'BOT-DOCUMENTAR'],
       ],
     ],
     {

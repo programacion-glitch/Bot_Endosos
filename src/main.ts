@@ -13,12 +13,12 @@ const PROCESSED_FOLDER = 'H2O-Endosos';
 
 // ─── Subject prefix validation ───────────────────────────────────────────────
 
-type SubjectPrefix = 'BOT-END' | 'DOCUMENTAR CLIENTE';
+type SubjectPrefix = 'BOT-END' | 'BOT-DOCUMENTAR';
 
 function getSubjectPrefix(subject: string): SubjectPrefix | null {
   const upper = subject.toUpperCase().trim();
-  if (upper.startsWith('DOCUMENTAR CLIENTE')) return 'DOCUMENTAR CLIENTE';
-  if (upper.startsWith('BOT-END')) return 'BOT-END';
+  if (upper.startsWith('BOT-DOCUMENTAR')) return 'BOT-DOCUMENTAR';
+  if (upper.startsWith('BOT-END') || upper.startsWith('END-BOT')) return 'BOT-END';
   return null;
 }
 
@@ -28,10 +28,10 @@ function validateCoherence(
 ): { valid: boolean; reason?: string } {
   const hasCreateInsured = commands.some(c => c.type === 'CREATE_INSURED');
 
-  if (prefix === 'DOCUMENTAR CLIENTE' && !hasCreateInsured) {
+  if (prefix === 'BOT-DOCUMENTAR' && !hasCreateInsured) {
     return {
       valid: false,
-      reason: 'Subject says DOCUMENTAR CLIENTE but no CREATE_INSURED command found in body',
+      reason: 'Subject says BOT-DOCUMENTAR but no CREATE_INSURED command found in body',
     };
   }
 
