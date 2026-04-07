@@ -7,6 +7,7 @@ export type CommandType =
   | 'ADD_DRIVER'
   | 'REMOVE_VEHICLE'
   | 'REMOVE_DRIVER'
+  | 'REMOVE_HOLDER'
   | 'ADD_ADDITIONAL_INSURED'
   | 'ADD_WAIVER_SUBROGATION'
   | 'ADD_AI_AND_WOS'
@@ -86,6 +87,11 @@ export interface RemoveVehicleCommand extends BaseCommand {
 export interface RemoveDriverCommand extends BaseCommand {
   type: 'REMOVE_DRIVER';
   driver: Driver;
+}
+
+export interface RemoveHolderCommand extends BaseCommand {
+  type: 'REMOVE_HOLDER';
+  holderName: string;
 }
 
 export interface HolderInfo {
@@ -228,6 +234,7 @@ export type Command =
   | AddDriverCommand
   | RemoveVehicleCommand
   | RemoveDriverCommand
+  | RemoveHolderCommand
   | AddAdditionalInsuredCommand
   | AddWaiverSubrogationCommand
   | AddAIAndWOSCommand
@@ -271,6 +278,7 @@ export interface ActionResult {
   message: string;
   downloadedFiles?: string[];
   error?: Error;
+  errorScreenshot?: string;
 }
 
 // ─── Agent ────────────────────────────────────────────────────────────────────

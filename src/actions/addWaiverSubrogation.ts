@@ -2,7 +2,7 @@ import { Page } from 'playwright';
 import { AddWaiverSubrogationCommand, ActionResult } from '../types';
 import { logger } from '../utils/logger';
 import { ok, fail, waitForSaveConfirmation, todayYYYYMMdd, safeFilenamePart } from './_base';
-import { openAdditionalInterestInsert, searchOrCreateHolder, downloadCertificate, selectNgMultiOption, policySelectionLabel, wosCheckbox } from './_holderHelpers';
+import { openAdditionalInterestInsert, searchOrCreateHolder, downloadCertificate, selectNgMultiOption, policySelectionLabel, wosCheckbox, writeDescriptionOfOperations } from './_holderHelpers';
 
 /**
  * ADD WAIVER OF SUBROGATION to AL/GL/WC (or combinations)
@@ -44,7 +44,7 @@ export async function addWaiverSubrogation(
     }
 
     if (cmd.holder.note) {
-      await page.fill('textarea[placeholder="Description of Operations"]', cmd.holder.note);
+      await writeDescriptionOfOperations(page, cmd.holder.note);
     }
 
     const saveBtn = page.locator('button, span.btn-loading, input[type="submit"]').filter({ hasText: /Save Changes/i }).first();

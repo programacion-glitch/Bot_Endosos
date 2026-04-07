@@ -11,6 +11,7 @@ import { addVehicle } from './addVehicle';
 import { addDriver } from './addDriver';
 import { removeVehicle } from './removeVehicle';
 import { removeDriver } from './removeDriver';
+import { removeHolder } from './removeHolder';
 import { addAdditionalInsured } from './addAdditionalInsured';
 import { addWaiverSubrogation } from './addWaiverSubrogation';
 import { addAIandWOS } from './addAIandWOS';
@@ -87,13 +88,20 @@ export async function dispatchCommands(
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       logger.error(`Command ${command.type} failed after all retries: ${error.message}`);
-      await screenshot(page, `error_${command.type}`).catch(() => {});
+      const shotPath = await screenshot(page, `error_${command.type}`).catch(() => undefined);
       result = {
         success: false,
         commandType: command.type,
         message: error.message,
         error,
+        errorScreenshot: shotPath,
       };
+    }
+
+    // If the command returned success: false (without throwing), still capture a screenshot
+    if (!result.success && !result.errorScreenshot) {
+      const shotPath = await screenshot(page, `fail_${command.type}`).catch(() => undefined);
+      if (shotPath) result.errorScreenshot = shotPath;
     }
 
     // After CREATE_INSURED succeeds, capture the new insured ID for subsequent commands
@@ -123,7 +131,7 @@ async function executeCommand(
       return createInsured(page, command);
 
     case 'CREATE_MASTER':
-      return createMaster(page);
+      return createMaster(page, email.usdot);
 
     case 'ADD_VEHICLE':
       return addVehicle(page, command, email.commands);
@@ -136,6 +144,9 @@ async function executeCommand(
 
     case 'REMOVE_DRIVER':
       return removeDriver(page, command);
+
+    case 'REMOVE_HOLDER':
+      return removeHolder(page, command);
 
     case 'ADD_ADDITIONAL_INSURED':
       return addAdditionalInsured(page, command);

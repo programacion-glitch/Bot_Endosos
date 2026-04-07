@@ -2,7 +2,7 @@ import { Page } from 'playwright';
 import { AddNoteToHolderCommand, ActionResult } from '../types';
 import { logger } from '../utils/logger';
 import { ok, fail, waitForSaveConfirmation, todayYYYYMMdd, safeFilenamePart } from './_base';
-import { openAdditionalInterestInsert, searchOrCreateHolder, downloadCertificate } from './_holderHelpers';
+import { openAdditionalInterestInsert, searchOrCreateHolder, downloadCertificate, writeDescriptionOfOperations } from './_holderHelpers';
 
 /**
  * ADD NOTE TO HOLDER
@@ -25,12 +25,10 @@ export async function addNoteToHolder(
     await searchOrCreateHolder(page, cmd.holder);
 
     if (cmd.holder.note) {
-      const descField = page.getByRole('textbox', { name: 'Description of Operations' });
-      await descField.waitFor({ state: 'visible', timeout: 10_000 });
-      await descField.fill(cmd.holder.note);
+      await writeDescriptionOfOperations(page, cmd.holder.note);
     }
 
-    const saveBtn = page.locator('button').filter({ hasText: /^Save Changes$/i }).first();
+    const saveBtn = page.locator('span.btn-loading, button, input[type="submit"]').filter({ hasText: /Save Changes/i }).first();
     await saveBtn.waitFor({ state: 'visible', timeout: 10_000 });
     await saveBtn.click({ force: true });
     await waitForSaveConfirmation(page);

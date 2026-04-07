@@ -71,11 +71,11 @@ async function chooseAuthorizedRepresentative(page: Page, authorizedRep: string)
  * CREATE MASTER
  * Steps:
  * 1. Documents -> Certificates(Master) -> Add New
- * 2. Remove period and DBA from client name field
+ * 2. Clean the client name: remove period, empty DBA, and add USDOT if available
  * 3. Set Authorized Representative (configurable via NOWCERTS_AUTHORIZED_REP)
  * 4. Save
  */
-export async function createMaster(page: Page): Promise<ActionResult> {
+export async function createMaster(page: Page, usdot?: string): Promise<ActionResult> {
   logger.info('createMaster: creating master certificate');
 
   try {
@@ -102,16 +102,28 @@ export async function createMaster(page: Page): Promise<ActionResult> {
 
     const nameInput = page.locator('#txtName').first();
     const insuredNameInput = page.locator('#ContentPlaceHolder1_usrAcord25_txt_Fsb_0_eb_dt_P1sb_0_eb_dt_NamedInsured_FullName_Asb_0_eb').first();
-    let cleanName = '';
-    if (await insuredNameInput.count() > 0) {
-      cleanName = cleanClientName(await insuredNameInput.inputValue());
-    }
-    if (!cleanName) {
-      cleanName = cleanClientName(await nameInput.inputValue());
-    }
 
+    // Clean the certificate name (#txtName) — remove period and empty DBA
+    let cleanCertName = '';
+    if (await insuredNameInput.count() > 0) {
+      cleanCertName = cleanClientName(await insuredNameInput.inputValue());
+    }
+    if (!cleanCertName) {
+      cleanCertName = cleanClientName(await nameInput.inputValue());
+    }
     await nameInput.fill('');
-    await nameInput.fill(cleanName);
+    await nameInput.fill(cleanCertName);
+
+    // Clean the INSURED field — remove period, empty DBA, and add USDOT
+    if (await insuredNameInput.count() > 0) {
+      let insuredName = cleanClientName(await insuredNameInput.inputValue());
+      if (usdot) {
+        insuredName = `${insuredName} USDOT ${usdot}`;
+      }
+      logger.info(`createMaster: insured name set to "${insuredName}"`);
+      await insuredNameInput.fill('');
+      await insuredNameInput.fill(insuredName);
+    }
 
     await chooseAuthorizedRepresentative(page, config.nowcerts.authorizedRep);
 

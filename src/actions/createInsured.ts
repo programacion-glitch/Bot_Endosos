@@ -1,7 +1,7 @@
 import { Page } from 'playwright';
 import { CreateInsuredCommand, ActionResult } from '../types';
 import { logger } from '../utils/logger';
-import { ok, fail, waitForSaveConfirmation, buildNowCertsUrl, STATE_NAMES, toFullStateName } from './_base';
+import { ok, fail, waitForSaveConfirmation, buildNowCertsUrl, STATE_NAMES, toFullStateName, parseUSAddress } from './_base';
 
 /**
  * CREATE INSURED
@@ -93,7 +93,10 @@ async function fillKendoDate(
   rowIndex: number,
   dateStr: string
 ): Promise<void> {
-  const [month, day, year] = dateStr.split('/');
+  const parts = dateStr.split('/');
+  const month = parts[0].padStart(2, '0');
+  const day   = parts[1].padStart(2, '0');
+  const year  = parts[2].padStart(4, '0');
   const containers = page.locator(containerSelector);
   if (await containers.count() === 0) {
     logger.warn(`fillKendoDate: "${containerSelector}" not found`);
@@ -157,12 +160,12 @@ export async function createInsured(
 
     // ── MAILING ADDRESS ───────────────────────────────────────────────────────
 
-    // Address comes in as "123 Main St, Dallas, TX, 75001"
-    const addrParts = cmd.address.split(',').map(s => s.trim());
-    await page.fill('input[placeholder="Address Line 1"]', addrParts[0] ?? '');
-    await page.fill('input[placeholder="City"]',           addrParts[1] ?? '');
-    const stateAbbr = addrParts[2]?.trim() ?? '';
-    const zip       = addrParts[3]?.trim() ?? '';
+    // Address comes in as "123 Main St, Dallas, TX, 75001" or "123 Main St, Dallas, TX 75001"
+    const addr = parseUSAddress(cmd.address);
+    await page.fill('input[placeholder="Address Line 1"]', addr.line1);
+    await page.fill('input[placeholder="City"]',           addr.city);
+    const stateAbbr = addr.state;
+    const zip       = addr.zip;
 
     await page.fill('input[placeholder="Zip/Postal Code"]', zip);
 
@@ -256,20 +259,30 @@ export async function createInsured(
       }
     }
 
-    // Primary Email — placeholder selector is reliable
+    // Primary Email — type the email normally so Angular registers the value.
+    // A suggestions popover may appear; we dismiss it without selecting anything.
     if (cmd.email) {
       const emailInput = page.locator('input[placeholder="Primary Email"]').first();
-      if (await emailInput.count() > 0) {
-        await emailInput.fill(cmd.email);
+      const emailFallback = page.locator('insureds-panel-contacts trucking-companies-redirect-popover input[type="text"]').first();
+      const target = (await emailInput.count() > 0) ? emailInput : (await emailFallback.count() > 0) ? emailFallback : null;
+
+      if (target) {
+        await target.click();
+        await page.waitForTimeout(200);
+        await target.fill(cmd.email);
+        await page.waitForTimeout(500);
+        // Dismiss any suggestions popover by pressing Escape, then Tab to move focus away
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(300);
+        // Remove any leftover overlay that might block the save button
+        await page.evaluate(() => {
+          const doc = (globalThis as any).document;
+          doc.querySelectorAll('.cdk-overlay-backdrop').forEach((el: any) => el.remove());
+          doc.querySelectorAll('.cdk-overlay-pane').forEach((el: any) => el.remove());
+        });
+        await page.waitForTimeout(200);
       } else {
-        // Fallback: trucking-companies-redirect-popover wraps the email input
-        // Find the one inside insureds-panel-contacts
-        const emailFallback = page.locator('insureds-panel-contacts trucking-companies-redirect-popover input[type="text"]').first();
-        if (await emailFallback.count() > 0) {
-          await emailFallback.fill(cmd.email);
-        } else {
-          logger.warn('Primary Email input not found');
-        }
+        logger.warn('Primary Email input not found');
       }
     }
 

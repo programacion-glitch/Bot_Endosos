@@ -59,7 +59,8 @@ export async function newPage(): Promise<Page> {
   const ctx = await getContext();
   const page = await ctx.newPage();
   // Default timeout for all actions
-  page.setDefaultTimeout(30_000);
+  page.setDefaultTimeout(60_000);
+  page.setDefaultNavigationTimeout(90_000);
   return page;
 }
 

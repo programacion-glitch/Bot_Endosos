@@ -32,7 +32,7 @@ export async function getNowCertsPage(): Promise<Page> {
 
 async function login(page: Page): Promise<void> {
   logger.info(`Navigating to NowCerts login: ${config.nowcerts.loginUrl}`);
-  await page.goto(config.nowcerts.loginUrl, { waitUntil: 'domcontentloaded' });
+  await page.goto(config.nowcerts.loginUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
 
   // If already logged in (redirected away from login page), skip
   if (!page.url().includes('Login')) {
@@ -79,8 +79,17 @@ export async function navigateToClient(
   // 4) click the insured result link to land on /AMSINS/Insureds/Details/{id}/Information
   // The search works reliably with DBA / name text.
 
-  await page.goto(buildNowCertsUrl('/AMSINS/DashboardLight'), { waitUntil: 'domcontentloaded', timeout: 60_000 });
-  await page.waitForTimeout(2000);
+  // Navigate to dashboard and wait for sidebar search to render
+  await page.goto(buildNowCertsUrl('/AMSINS/DashboardLight'), { waitUntil: 'domcontentloaded', timeout: 120_000 });
+  // Wait for the sidebar search input to appear (Angular renders it async)
+  try {
+    await page.waitForSelector('#navigationSearchTermInput', { state: 'visible', timeout: 60_000 });
+  } catch {
+    logger.warn('Sidebar search input not visible after 60s, retrying with page reload...');
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 120_000 });
+    await page.waitForSelector('#navigationSearchTermInput', { state: 'visible', timeout: 60_000 }).catch(() => {});
+  }
+  await page.waitForTimeout(1000);
 
   const searchTerm = usdot?.trim() || clientName.trim();
   const searchInput = page.locator('#navigationSearchTermInput').first();
@@ -131,40 +140,34 @@ export async function navigateToClient(
     logger.warn(`Could not set Active filter: ${(err as Error).message}`);
   }
 
-  // Prefer the result row that contains the "Active" badge
+  // Scan ALL insured links and pick the one with the most recent year in the name
   const allInsuredLinks = page.locator('a[href*="/AMSINS/Insureds/Details/"]');
   const linkCount = await allInsuredLinks.count();
   let result = null;
+  let bestYear = -1;
 
-  // First pass: find a link whose parent result row has "Active" status
   for (let i = 0; i < linkCount; i++) {
     const link = allInsuredLinks.nth(i);
-    const row = link.locator('..').locator('..');
-    const activeBadge = row.locator('text="Active"');
-    if (await activeBadge.count() > 0) {
-      const linkText = await link.textContent() ?? '';
-      logger.info(`Found active result: "${linkText.trim()}"`);
+    const linkText = await link.textContent() ?? '';
+    logger.info(`Search result [${i}]: "${linkText.trim()}"`);
+    // Extract the highest year from the name (e.g. "2026 - 2027" → 2027)
+    const years = linkText.match(/\d{4}/g)?.map(Number) ?? [];
+    const maxYear = years.length > 0 ? Math.max(...years) : 0;
+    if (maxYear > bestYear) {
       result = link;
-      break;
+      bestYear = maxYear;
     }
   }
 
-  // Fallback: match by name or first insured link
-  if (!result) {
-    const exactResult = page.locator('a').filter({ hasText: new RegExp(`^${escapeRegex(clientName)}$`, 'i') }).first();
-    const partialResult = page.locator('a').filter({ hasText: new RegExp(escapeRegex(clientName), 'i') }).first();
-    const firstInsuredLink = allInsuredLinks.first();
+  // If no years found in any name, fallback to last link
+  if (!result && linkCount > 0) {
+    result = allInsuredLinks.last();
+    logger.info('No year found in results, using last insured link');
+  }
 
-    result = (await exactResult.count()) > 0
-      ? exactResult
-      : (await partialResult.count()) > 0
-        ? partialResult
-        : null;
-
-    if (!result && usdot && (await firstInsuredLink.count()) > 0) {
-      logger.info('Exact/partial name not found, using first insured result from USDOT search');
-      result = firstInsuredLink;
-    }
+  if (result) {
+    const selectedText = await result.textContent().catch(() => '');
+    logger.info(`Selected most recent result: "${selectedText?.trim()}" (year: ${bestYear})`);
   }
 
   if (!result || (await result.count()) === 0) {
@@ -172,7 +175,16 @@ export async function navigateToClient(
     return false;
   }
 
-  await result.click();
+  // Get the href and navigate directly to avoid opening in a new window/tab
+  const href = await result.getAttribute('href');
+  if (href) {
+    const fullUrl = href.startsWith('http') ? href : `${new URL(page.url()).origin}${href}`;
+    await page.goto(fullUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+  } else {
+    // Remove target="_blank" to prevent new tab, then click
+    await result.evaluate((el: any) => el.removeAttribute('target'));
+    await result.click();
+  }
   await page.waitForURL('**/AMSINS/Insureds/Details/*/Information', { timeout: 20_000 }).catch(() => {});
   await page.waitForTimeout(1500);
   logger.info(`Navigated to client: "${clientName}" -> ${page.url()}`);

@@ -2,7 +2,7 @@ import { Page } from 'playwright';
 import { AddLossPayeeCommand, ActionResult } from '../types';
 import { logger } from '../utils/logger';
 import { ok, fail, waitForSaveConfirmation, todayYYYYMMdd, safeFilenamePart } from './_base';
-import { openAdditionalInterestInsert, searchOrCreateHolder, downloadCertificate } from './_holderHelpers';
+import { openAdditionalInterestInsert, searchOrCreateHolder, downloadCertificate, selectNgMultiOption, policySelectionLabel, writeDescriptionOfOperations } from './_holderHelpers';
 
 /**
  * ADD LOSS PAYEE TO VIN#
@@ -34,16 +34,26 @@ export async function addLossPayee(page: Page, cmd: AddLossPayeeCommand): Promis
     await lpCheckbox.check();
     await page.waitForTimeout(300);
 
-    // Note / Description of Operations
-    if (cmd.holder.note) {
-      const descField = page.getByRole('textbox', { name: 'Description of Operations' });
-      await descField.waitFor({ state: 'visible', timeout: 10_000 });
-      await descField.fill(cmd.holder.note);
+    // Select Physical Damage policy from the dropdown (manual: step 4)
+    const policyLabel = cmd.policyLabel ?? 'Physical Damage';
+    let foundPolicy = false;
+    for (let attempt = 0; attempt < 3 && !foundPolicy; attempt++) {
+      if (attempt > 0) await page.waitForTimeout(1000);
+      foundPolicy = await selectNgMultiOption(page, 2, policyLabel);
+    }
+    if (!foundPolicy) {
+      logger.warn(`Policy selector option not found for "${policyLabel}"`);
     }
 
-    // Save
-    const saveBtn = page.locator('button').filter({ hasText: /^Save Changes$/i }).first();
+    // Note / Description of Operations
+    if (cmd.holder.note) {
+      await writeDescriptionOfOperations(page, cmd.holder.note);
+    }
+
+    // Save - use a broad selector for Save Changes button (matches button, span.btn-loading, input[type="submit"])
+    const saveBtn = page.locator('span.btn-loading, button, input[type="submit"]').filter({ hasText: /Save Changes/i }).first();
     await saveBtn.waitFor({ state: 'visible', timeout: 10_000 });
+    await saveBtn.scrollIntoViewIfNeeded().catch(() => {});
     await saveBtn.click({ force: true });
     await waitForSaveConfirmation(page);
     await page.waitForTimeout(2000);

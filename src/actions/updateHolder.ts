@@ -1,8 +1,8 @@
 import { Page } from 'playwright';
 import { UpdateHolderCommand, ActionResult } from '../types';
 import { logger } from '../utils/logger';
-import { ok, fail, todayYYYYMMdd, safeFilenamePart, waitForSaveConfirmation, escapeRegex } from './_base';
-import { downloadCertificate } from './_holderHelpers';
+import { ok, fail, todayYYYYMMdd, safeFilenamePart, waitForSaveConfirmation, escapeRegex, parseUSAddress } from './_base';
+import { downloadCertificate, writeDescriptionOfOperations } from './_holderHelpers';
 
 function looksLikeAddressUpdate(value: string): boolean {
   const trimmed = value.trim();
@@ -10,12 +10,12 @@ function looksLikeAddressUpdate(value: string): boolean {
 }
 
 function parseAddress(value: string) {
-  const parts = value.split(',').map(x => x.trim()).filter(Boolean);
+  const parsed = parseUSAddress(value);
   return {
-    address1: parts[0] ?? value.trim(),
-    city: parts[1] ?? '',
-    state: parts[2] ?? '',
-    zip: parts[3] ?? '',
+    address1: parsed.line1 || value.trim(),
+    city: parsed.city,
+    state: parsed.state,
+    zip: parsed.zip,
   };
 }
 
@@ -100,7 +100,7 @@ export async function updateHolder(page: Page, cmd: UpdateHolderCommand): Promis
     }
 
     if (cmd.note) {
-      await page.fill('textarea[placeholder="Description of Operations"]', cmd.note);
+      await writeDescriptionOfOperations(page, cmd.note);
     }
 
     const saveBtn = page.locator('span.btn-loading').filter({ hasText: /^Save Changes$/i }).first();

@@ -125,6 +125,50 @@ export async function sendAlertEmail(params: {
   logger.warn(`Alert email sent: ${params.subject}`);
 }
 
+// ─── Error notification email ────────────────────────────────────────────────
+
+export async function sendErrorNotification(params: {
+  emailSubject: string;
+  errorMessage: string;
+  commandType?: string;
+  clientName?: string;
+  usdot?: string;
+  screenshots?: string[];
+}): Promise<void> {
+  const notifyEmail = config.errorNotify?.email;
+  if (!notifyEmail) return;
+
+  const { emailSubject, errorMessage, commandType, clientName, usdot, screenshots } = params;
+  const subject = `[BOT ERROR] ${clientName ? `${clientName}` : 'Unknown client'}${usdot ? ` USDOT ${usdot}` : ''}`;
+
+  const screenshotsHtml = screenshots && screenshots.length > 0
+    ? `<p><strong>Capturas de pantalla adjuntas:</strong> ${screenshots.length}</p>`
+    : '';
+
+  const html = `
+    <h3 style="color:red;">Error en Bot de Endosos</h3>
+    <p><strong>Email procesado:</strong> ${emailSubject}</p>
+    ${clientName ? `<p><strong>Cliente:</strong> ${clientName}</p>` : ''}
+    ${usdot ? `<p><strong>USDOT:</strong> ${usdot}</p>` : ''}
+    ${commandType ? `<p><strong>Comando:</strong> ${commandType}</p>` : ''}
+    <p><strong>Error:</strong></p>
+    <pre style="background:#f5f5f5;padding:10px;border:1px solid #ddd;">${errorMessage}</pre>
+    ${screenshotsHtml}
+    <p><em>Fecha: ${new Date().toLocaleString('es-CO', { timeZone: 'America/Chicago' })}</em></p>
+  `;
+
+  const attachments = (screenshots ?? [])
+    .filter(p => !!p)
+    .map(p => ({ path: p, filename: path.basename(p) }));
+
+  try {
+    await send({ to: notifyEmail, subject, html, attachments });
+    logger.info(`Error notification sent to ${notifyEmail}${attachments.length > 0 ? ` (${attachments.length} screenshots)` : ''}`);
+  } catch (err) {
+    logger.error(`Failed to send error notification: ${(err as Error).message}`);
+  }
+}
+
 // ─── Internal send helper ─────────────────────────────────────────────────────
 
 async function send(options: {

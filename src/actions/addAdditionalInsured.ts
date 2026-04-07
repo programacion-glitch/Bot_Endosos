@@ -2,7 +2,7 @@ import { Page } from 'playwright';
 import { AddAdditionalInsuredCommand, ActionResult } from '../types';
 import { logger } from '../utils/logger';
 import { ok, fail, waitForSaveConfirmation, todayYYYYMMdd, safeFilenamePart } from './_base';
-import { openAdditionalInterestInsert, searchOrCreateHolder, downloadCertificate, selectNgMultiOption, policySelectionLabel } from './_holderHelpers';
+import { openAdditionalInterestInsert, searchOrCreateHolder, downloadCertificate, selectNgMultiOption, policySelectionLabel, writeDescriptionOfOperations } from './_holderHelpers';
 
 /**
  * ADD ADDITIONAL INSURED to AL/GL (or combinations)
@@ -62,7 +62,7 @@ export async function addAdditionalInsured(
 
     // Note
     if (cmd.holder.note) {
-      await page.fill('textarea[placeholder="Description of Operations"]', cmd.holder.note);
+      await writeDescriptionOfOperations(page, cmd.holder.note);
     }
 
     // Save - try multiple selectors for the Save Changes button

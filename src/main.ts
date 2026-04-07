@@ -4,7 +4,7 @@ import { parseEmail } from './email/emailParser';
 import { dispatchCommands } from './actions/dispatcher';
 import { getNowCertsPage, navigateToClient, invalidateSession } from './browser/nowcertsLogin';
 import { closeBrowser, screenshot } from './browser/browserManager';
-import { sendReviewEmail, sendClientApprovalEmail, sendAlertEmail } from './email/emailSender';
+import { sendReviewEmail, sendClientApprovalEmail, sendAlertEmail, sendErrorNotification } from './email/emailSender';
 import { findAgentEmails } from './utils/agentLookup';
 import { logger, logEmailProcessing } from './utils/logger';
 import { ActionResult, Command } from './types';
@@ -98,31 +98,36 @@ async function processEmail(raw: RawEmail): Promise<void> {
     results = await dispatchCommands(page, email);
   } catch (err) {
     logger.error(`Fatal error during command dispatch: ${(err as Error).message}`);
+    await sendErrorNotification({
+      emailSubject: email.subject,
+      errorMessage: `Fatal error: ${(err as Error).message}\n\n${(err as Error).stack ?? ''}`,
+      clientName: email.clientName,
+      usdot: email.usdot,
+    });
     invalidateSession();
     await markAsSeen(raw.uid);
     return;
   }
 
-  // Collect downloaded files from all successful commands
+  // Collect downloaded files and error screenshots from all commands
   const allFiles = results.flatMap(r => r.downloadedFiles ?? []);
+  const errorScreenshots = results.map(r => r.errorScreenshot).filter((s): s is string => !!s);
   const failures = results.filter(r => !r.success);
   const successes = results.filter(r => r.success);
 
   // Build changes description for email
   const changesDescription = buildChangesDescription(results);
 
-  // Send review email (proof of insurance)
-  if (allFiles.length > 0 && successes.length > 0) {
-    try {
-      await sendReviewEmail({
-        clientName: email.clientName ?? 'Unknown',
-        usdot: email.usdot ?? '',
-        changesDescription,
-        attachments: allFiles,
-      });
-    } catch (err) {
-      logger.error(`Failed to send review email: ${(err as Error).message}`);
-    }
+  // Always send review email with results summary (downloads + error screenshots)
+  try {
+    await sendReviewEmail({
+      clientName: email.clientName ?? 'Unknown',
+      usdot: email.usdot ?? '',
+      changesDescription,
+      attachments: [...allFiles, ...errorScreenshots],
+    });
+  } catch (err) {
+    logger.error(`Failed to send review email: ${(err as Error).message}`);
   }
 
   // Move to processed folder if all commands succeeded, otherwise just mark as seen
@@ -140,6 +145,13 @@ async function processEmail(raw: RawEmail): Promise<void> {
   if (failures.length > 0) {
     const failSummary = failures.map(f => `${f.commandType}: ${f.message}`).join('\n');
     logger.error(`Failures:\n${failSummary}`);
+    await sendErrorNotification({
+      emailSubject: email.subject,
+      errorMessage: `${failures.length} command(s) failed:\n\n${failSummary}`,
+      clientName: email.clientName,
+      usdot: email.usdot,
+      screenshots: errorScreenshots,
+    });
   }
 }
 

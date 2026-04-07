@@ -47,6 +47,10 @@ export const config = {
     email: required('REVIEW_EMAIL'),
   },
 
+  errorNotify: {
+    email: optional('ERROR_NOTIFY_EMAIL', ''),
+  },
+
   files: {
     agentsExcelPath: path.resolve(optional('AGENTS_EXCEL_PATH', './data/agents.xlsx')),
     downloadsPath: path.resolve(optional('DOWNLOADS_PATH', './downloads')),

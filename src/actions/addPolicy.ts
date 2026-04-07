@@ -213,13 +213,22 @@ async function fillWorkersComp(page: Page, cmd: AddPolicyCommand): Promise<void>
   await fillCoverageText(page, byIdEndsWith('workerCompAndEmployersLiability_txtPolicyEmployerLiability'), cmd.elDiseasePolicyLimit);
 }
 
-function assertValidatedCoverageSupport(cmd: AddPolicyCommand): void {
-  if (cmd.policyType === 'EXL' && (cmd.eachOccurrence || cmd.aggregate)) {
-    throw new Error('EXL occurrence/aggregate fields are still not validated live in NowCerts.');
-  }
+async function fillExcessLiability(page: Page, cmd: AddPolicyCommand): Promise<void> {
+  await setCheckboxById(page, byIdEndsWith('excessUmbrellaLiability_cbExcessUmbrellaLiability'), true);
+  await fillCoverageText(page, byIdEndsWith('excessUmbrellaLiability_txtEachOccurrence'), cmd.eachOccurrence);
+  await fillCoverageText(page, byIdEndsWith('excessUmbrellaLiability_txtAgregate'), cmd.aggregate);
 }
 
+/**
+ * Navigates to the master certificate edit page and assigns the new policy.
+ *
+ * NOTE (2026-03-31): NowCerts updated the Certificates page from a Telerik RadWindow
+ * popup (rwPopup iframe) to a full-page navigation. The "Edit" action now navigates
+ * to /Certificates/Edit.aspx instead of opening an iframe popup.
+ * The ASP.NET controls (policies dropdown, update button) remain the same on the edit page.
+ */
 async function assignPolicyToMasterCertificate(page: Page, certificatesUrl: string, cmd: AddPolicyCommand): Promise<void> {
+  logger.info(`assignPolicyToMaster: navigating to certificates page`);
   await page.goto(certificatesUrl, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(2000);
 
@@ -227,6 +236,7 @@ async function assignPolicyToMasterCertificate(page: Page, certificatesUrl: stri
     has: page.locator('button, a, span').filter({ hasText: /Actions/i }),
   });
   const count = await certRows.count();
+  logger.info(`assignPolicyToMaster: found ${count} certificate rows`);
   if (count === 0) {
     logger.info('No master certificate found — skipping policy assignment to master');
     return;
@@ -236,41 +246,111 @@ async function assignPolicyToMasterCertificate(page: Page, certificatesUrl: stri
   }
 
   const row = certRows.first();
+  logger.info('assignPolicyToMaster: clicking Actions on master row');
   await row.locator('button, a, span').filter({ hasText: /Actions/i }).first().click({ force: true });
   await page.waitForTimeout(700);
-  await page.locator('li, a, span').filter({ hasText: /^Edit$/i }).first().click({ force: true });
-  await page.waitForTimeout(3000);
+  logger.info('assignPolicyToMaster: clicking Edit from kendo menu');
+  await page.locator('.k-animation-container .k-item, .k-menu-popup .k-item').filter({ hasText: /^Edit$/i }).first().click();
 
-  const frame = page.frame({ name: 'rwPopup' });
-  if (!frame) {
-    throw new Error('Master certificate edit popup did not load');
+  // Wait for the edit modal/page to load.
+  // NowCerts may use either a full-page navigation or a modal popup (rwPopup iframe).
+  let editContext: Page | ReturnType<typeof page.frame> = page;
+
+  // Quick check: did it navigate to a full page?
+  await page.waitForURL('**/Certificates/Edit.aspx**', { timeout: 5_000 }).catch(() => {});
+
+  if (page.url().includes('/Certificates/Edit.aspx')) {
+    logger.info(`assignPolicyToMaster: navigated to edit page`);
+    await page.waitForTimeout(3000);
+  } else {
+    // It's a modal popup — wait for the rwPopup iframe to load with retries
+    let found = false;
+    for (let attempt = 0; attempt < 6 && !found; attempt++) {
+      await page.waitForTimeout(2000 + attempt * 1000);
+      // Try rwPopup frame
+      const frame = page.frame({ name: 'rwPopup' });
+      if (frame) {
+        const hasSelector = await frame.locator(MASTER_POLICIES_ARROW).count().catch(() => 0);
+        if (hasSelector > 0) { editContext = frame; found = true; break; }
+      }
+      // Fallback: search all frames
+      for (const f of page.frames()) {
+        if (f === page.mainFrame()) continue;
+        const has = await f.locator(MASTER_POLICIES_ARROW).count().catch(() => 0);
+        if (has > 0) { editContext = f; found = true; break; }
+      }
+      if (!found) logger.info(`assignPolicyToMaster: modal not ready (attempt ${attempt + 1}/6)`);
+    }
+    if (!found) {
+      throw new Error('Master certificate edit modal did not load after 6 attempts');
+    }
+    logger.info('assignPolicyToMaster: modal loaded');
   }
 
-  const arrow = frame.locator(MASTER_POLICIES_ARROW).first();
-  await arrow.click({ force: true }).catch(async () => {
-    await arrow.evaluate((el: any) => el.click());
-  });
-  await frame.waitForTimeout(500);
+  // Wait for the policies selector to be ready
+  const policiesArrow = editContext.locator(MASTER_POLICIES_ARROW).first();
+  await policiesArrow.waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {});
 
   const labelText = `${cmd.policyNumber} (${cmd.effectiveDate}, ${LOB_NAMES[cmd.policyType]})`;
-  const exact = frame.locator(MASTER_POLICIES_ITEMS).filter({
-    hasText: new RegExp(`^${escapeRegex(labelText)}$`, 'i'),
-  }).first();
-  const partial = frame.locator(MASTER_POLICIES_ITEMS).filter({
-    hasText: new RegExp(escapeRegex(cmd.policyNumber), 'i'),
-  }).first();
-  const item = (await exact.count()) > 0 ? exact : partial;
-  if (await item.count() === 0) {
-    throw new Error(`New policy not found in master certificate selector: ${cmd.policyNumber}`);
+  logger.info(`assignPolicyToMaster: searching for policy — exact: "${labelText}", partial: "${cmd.policyNumber}"`);
+
+  let selectedItem = false;
+  for (let attempt = 0; attempt < 3 && !selectedItem; attempt++) {
+    logger.info(`assignPolicyToMaster: opening dropdown (attempt ${attempt + 1})`);
+    await policiesArrow.click({ force: true }).catch(async () => {
+      await policiesArrow.evaluate((el: any) => el.click());
+    });
+    await page.waitForTimeout(800 + attempt * 500);
+
+    const allItems = editContext.locator(MASTER_POLICIES_ITEMS);
+    const itemCount = await allItems.count();
+
+    if (itemCount === 0) {
+      logger.warn(`assignPolicyToMaster: dropdown empty on attempt ${attempt + 1}, retrying...`);
+      await page.keyboard.press('Escape').catch(() => {});
+      await page.waitForTimeout(500);
+      continue;
+    }
+
+    if (attempt === 0) {
+      for (let i = 0; i < itemCount; i++) {
+        const text = await allItems.nth(i).textContent().catch(() => '');
+        logger.info(`assignPolicyToMaster: dropdown item[${i}]: "${text?.trim()}"`);
+      }
+    }
+
+    const exact = allItems.filter({ hasText: new RegExp(`^${escapeRegex(labelText)}$`, 'i') }).first();
+    const partial = allItems.filter({ hasText: new RegExp(escapeRegex(cmd.policyNumber), 'i') }).first();
+    const item = (await exact.count()) > 0 ? exact : partial;
+
+    if (await item.count() === 0) {
+      logger.warn(`assignPolicyToMaster: policy not found on attempt ${attempt + 1}, retrying...`);
+      await page.keyboard.press('Escape').catch(() => {});
+      await page.waitForTimeout(500);
+      continue;
+    }
+
+    const itemText = await item.textContent().catch(() => '');
+    logger.info(`assignPolicyToMaster: selecting policy "${itemText?.trim()}"`);
+    await item.locator('input[type="checkbox"]').evaluate((el: any) => el.click());
+    // Close the dropdown so the selection registers properly
+    await page.keyboard.press('Escape').catch(() => {});
+    logger.info('assignPolicyToMaster: waiting 10s for selection to register...');
+    await page.waitForTimeout(10_000);
+    selectedItem = true;
   }
 
-  await item.locator('input[type="checkbox"]').evaluate((el: any) => el.click());
-  await frame.waitForTimeout(300);
+  if (!selectedItem) {
+    throw new Error(`New policy not found in master certificate selector after 3 attempts: ${cmd.policyNumber}`);
+  }
 
-  const updateBtn = frame.locator(MASTER_UPDATE_BUTTON).first();
+  const updateBtn = editContext.locator(MASTER_UPDATE_BUTTON).first();
+  logger.info('assignPolicyToMaster: clicking Update button');
   await updateBtn.scrollIntoViewIfNeeded().catch(() => {});
   await updateBtn.evaluate((el: any) => el.click());
-  await page.waitForTimeout(5000);
+  // Wait for the save to complete
+  await page.waitForTimeout(8000);
+  logger.info('assignPolicyToMaster: done');
 }
 
 function mapLimitToCsl(limit?: string): string | null {
@@ -316,7 +396,6 @@ export async function addPolicy(page: Page, cmd: AddPolicyCommand): Promise<Acti
 
   try {
     await validateSupportedPolicy(cmd);
-    assertValidatedCoverageSupport(cmd);
 
     const certificatesUrl = getInsuredUrl(page, 'Certificates');
 
@@ -382,7 +461,27 @@ export async function addPolicy(page: Page, cmd: AddPolicyCommand): Promise<Acti
       await fillWorkersComp(page, cmd);
     }
 
+    if (cmd.policyType === 'EXL') {
+      await fillExcessLiability(page, cmd);
+    }
+
     if (cmd.policyType === 'APD') {
+      // Debug: dump ALL inputs with IDs to find APD controls
+      const allInputs = await page.evaluate(() => {
+        const doc = (globalThis as any).document;
+        const inputs = Array.from(doc.querySelectorAll('input, select, textarea')) as any[];
+        return inputs.map((el: any) => `${el.tagName}#${el.id || '(no-id)'}[type=${el.type || 'n/a'}]`)
+          .filter((s: string) => s.includes('Damage') || s.includes('damage') || s.includes('hisycal') || s.includes('hysical') || s.includes('Cargo') || s.includes('cargo'));
+      });
+      logger.info(`APD debug: damage/physical/cargo related inputs (${allInputs.length}):\n${allInputs.join('\n')}`);
+      // Also check the HTML around the coverages section
+      const coveragesHtml = await page.evaluate(() => {
+        const doc = (globalThis as any).document;
+        const section = doc.querySelector('[id*="LinesOfBusinessAndFees_usrPolicyCoverages"]')
+          || doc.querySelector('[id*="LinesOfBusinessAndFees_rptManageCoverages"]');
+        return section ? section.innerHTML.substring(0, 3000) : 'coverages section not found';
+      });
+      logger.info(`APD debug: coverages HTML preview:\n${coveragesHtml.substring(0, 2000)}`);
       await fillPhysicalDamage(page, cmd);
     }
 

@@ -42,25 +42,40 @@ export async function waitForSaveConfirmation(page: Page): Promise<void> {
 
 /**
  * Downloads a file from a download trigger and saves it to downloads folder.
- * Returns the saved file path.
+ * Uses a timeout so if the download event doesn't fire (e.g. in headless mode
+ * when NowCerts opens a new tab instead), it retries the trigger once.
  */
 export async function triggerDownload(
   page: Page,
   triggerFn: () => Promise<void>,
   filename: string
 ): Promise<string> {
-  const [download] = await Promise.all([
-    page.waitForEvent('download'),
-    triggerFn(),
-  ]);
-
   const dir = config.files.downloadsPath;
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-
   const filePath = path.join(dir, filename);
-  await download.saveAs(filePath);
-  logger.info(`Downloaded: ${filePath}`);
-  return filePath;
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const [download] = await Promise.all([
+        page.waitForEvent('download', { timeout: 30_000 }),
+        triggerFn(),
+      ]);
+      await download.saveAs(filePath);
+      logger.info(`Downloaded: ${filePath}`);
+      return filePath;
+    } catch (err) {
+      if (attempt === 0) {
+        logger.warn(`triggerDownload: download event not received, retrying...`);
+        // Dismiss any open menus before retrying
+        await page.keyboard.press('Escape').catch(() => {});
+        await page.waitForTimeout(2000);
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  throw new Error(`Download failed for ${filename} after 2 attempts`);
 }
 
 /**
@@ -188,6 +203,30 @@ export const STATE_NAMES: Record<string, string> = {
 /** Converts a two-letter state abbreviation to its full name, falling back to the original value. */
 export function toFullStateName(value: string): string {
   return STATE_NAMES[value.toUpperCase()] ?? value;
+}
+
+/**
+ * Parses a US address string into components.
+ * Handles both "Street, City, State, Zip" and "Street, City, State Zip" formats.
+ */
+export function parseUSAddress(address: string): { line1: string; city: string; state: string; zip: string } {
+  const parts = address.split(',').map(s => s.trim());
+  const line1 = parts[0] ?? '';
+  const city = parts[1] ?? '';
+
+  if (parts.length >= 4) {
+    // "Street, City, State, Zip"
+    return { line1, city, state: parts[2] ?? '', zip: parts[3] ?? '' };
+  }
+
+  // "Street, City, State Zip" — split last part by space
+  const lastPart = parts[2] ?? '';
+  const match = lastPart.match(/^([A-Za-z]{2})\s+(.+)$/);
+  if (match) {
+    return { line1, city, state: match[1], zip: match[2] };
+  }
+
+  return { line1, city, state: lastPart, zip: '' };
 }
 
 /** Maps policy type codes to the display labels used in NowCerts policy grids. */

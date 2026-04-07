@@ -11,6 +11,7 @@ import {
   AddDriverCommand,
   RemoveVehicleCommand,
   RemoveDriverCommand,
+  RemoveHolderCommand,
 } from '../types';
 import { logger } from '../utils/logger';
 
@@ -19,7 +20,7 @@ import { logger } from '../utils/logger';
 //   TIPO // ClientName // USDOT 123456
 //   TIPO // ClientName // DBA SomeName
 //   TIPO // ClientName // USDOT 123456 // DBA SomeName
-const SUBJECT_USDOT_RE = /USDOT\s+([A-Z0-9]+)/i;
+const SUBJECT_USDOT_RE = /USDOT:?\s+([A-Z0-9]+)/i;
 const SUBJECT_DBA_RE = /\bDBA:?\s+([^/]+)/i;
 
 function parseSubject(subject: string): { clientName?: string; usdot?: string; dba?: string } {
@@ -31,8 +32,8 @@ function parseSubject(subject: string): { clientName?: string; usdot?: string; d
 
   let namePart = subject;
 
-  // 1. Remove USDOT
-  namePart = namePart.replace(/USDOT\s+[A-Z0-9]+/i, '');
+  // 1. Remove USDOT (with or without colon)
+  namePart = namePart.replace(/USDOT:?\s+[A-Z0-9]+/i, '');
 
   // 2. Remove DBA and its value
   namePart = namePart.replace(/\bDBA:?\s+[^/]+/i, '');
@@ -82,7 +83,7 @@ function detectSendTo(body: string): string | undefined {
 // 2. A blank line followed by a line starting with a known command keyword
 
 /** Patterns that mark the start of a new command block */
-const COMMAND_START_RE = /^(?:Create\s+Insured|Create\s+Master|Add\s+(?:Vehicle|Trailer|Driver|Additional\s+Insured|Waiver\s+of\s+Subrogation|Note\s+to|Loss\s+Payee|Policy)|Remove\s+(?:Vehicle|Trailer|Driver)|Update\s+(?:Holder|LP\s+Holder|limit\/deductible|limit|deductible|mailing\s+address|Vehicle|Policy\s+Number)|Delete\s+Vehicle|No\s+Change|Type:\s*(?:Tractor|Truck|Trailer))\b/i;
+const COMMAND_START_RE = /^(?:Create\s+Insured|Create\s+Master|Add\s+(?:Vehicle|Trailer|Driver|Additional\s+Insured|Waiver\s+of\s+Subrogation|Note\s+to|Loss\s+Payee|Policy)|Remove\s+(?:Vehicle|Trailer|Driver|Holder)|Update\s+(?:Holder|LP\s+Holder|limit\/deductible|limit|deductible|mailing\s+address|Vehicle|Policy\s+Number)|Delete\s+Vehicle|No\s+Change|Type:\s*(?:Tractor|Truck|Trailer))\b/i;
 
 function splitCommandBlocks(body: string): string[] {
   // First try legacy "x" / "xx" separator
@@ -123,6 +124,12 @@ function field(block: string, key: string): string | undefined {
   return block.match(re)?.[1]?.trim();
 }
 
+/** Converts `||` separators to newlines in note text. */
+function normalizeNote(value: string | undefined): string | undefined {
+  if (!value) return value;
+  return value.replace(/\s*\|\|\s*/g, '\n');
+}
+
 function parseDriverLine(line: string): Driver | null {
   // Supported CDL formats:
   //   CDL: 1232132 WI          (number STATE  - no parens)
@@ -161,7 +168,7 @@ function parseHolder(block: string): HolderInfo {
   return {
     name: field(block, "Holder[’']?s? ?name") ?? field(block, 'Holder name') ?? '',
     address: field(block, "Holder[’']?s? ?[Aa]ddress") ?? '',
-    note: field(block, 'Note') ?? undefined,
+    note: normalizeNote(field(block, 'Note')),
   };
 }
 
@@ -203,13 +210,14 @@ function parseBlock(block: string): Command | null {
   //   Type: Tractor Truck // VIN Number: ### // Year: YYYY // ...  (implicit add)
   if (/^(?:Add\s+(?:Vehicle\/Trailer|Vehicle|Trailer)|Type:\s*(?:Tractor\s+Truck|Truck|Trailer))\b/i.test(firstLine)) {
     // Try single-line first, then fall back to multi-line block parsing
+    // All field separators (:) are optional to support emails with or without colons
     const vinRe = /(?:VIN(?:#|\s+Number):?\s*)([\w]+)/i;
     const vinM = firstLine.match(vinRe) ?? block.match(vinRe);
-    const yearM = firstLine.match(/Year:\s*(\d{1,2},?\d{3}|\d{4})/i) ?? block.match(/Year:\s*(\d{1,2},?\d{3}|\d{4})/i);
-    const descM = firstLine.match(/Description:\s*([^/\n]+)/i) ?? block.match(/Description:\s*([^/\n]+)/i);
-    const valueM = firstLine.match(/Value:\s*\$?([\d,]+[^/]*)/i) ?? block.match(/Value:\s*\$?([\d,]+[^/\n]*)/i);
-    const effM = firstLine.match(/Effective\s*Date:\s*([\d/]+)/i)
-      ?? block.match(/Effective\s*Date:\s*([\d/]+)/i);
+    const yearM = firstLine.match(/Year:?\s+(\d{1,2},?\d{3}|\d{4})/i) ?? block.match(/Year:?\s+(\d{1,2},?\d{3}|\d{4})/i);
+    const descM = firstLine.match(/Description:?\s+([^/\n]+)/i) ?? block.match(/Description:?\s+([^/\n]+)/i);
+    const valueM = firstLine.match(/Value:?\s+\$?([\d,]+[^/]*)/i) ?? block.match(/Value:?\s+\$?([\d,]+[^/\n]*)/i);
+    const effM = firstLine.match(/Effective\s*Date:?\s+([\d/]+)/i)
+      ?? block.match(/Effective\s*Date:?\s+([\d/]+)/i);
 
     return {
       type: 'ADD_VEHICLE',
@@ -223,13 +231,13 @@ function parseBlock(block: string): Command | null {
   }
 
   // ── Remove Vehicle/Trailer ────────────────────────────────────────────────
-  if (/^(?:Remove|Delete)\s+(?:Vehicle\/Trailer|Vehicle|Trailer)\b(?!\s*\/Driver)/i.test(firstLine)) {
+  if (/^(?:Remove|Delete)\s+(?:Vehicle\/Trailer|Vehicle|Trailer)\b(?!\s*\/(?:Driver|Holder))/i.test(firstLine)) {
     const vinM = firstLine.match(/VIN#:?\s*([\w]+)/i) ?? block.match(/VIN#:?\s*([\w]+)/i);
-    const yearM = firstLine.match(/Year:\s*(\d{1,2},?\d{3}|\d{4})/i) ?? block.match(/Year:\s*(\d{1,2},?\d{3}|\d{4})/i);
-    const descM = firstLine.match(/Description:\s*([^/\n]+)/i) ?? block.match(/Description:\s*([^/\n]+)/i);
-    const valueM = firstLine.match(/Value:\s*(\$[\d,]+[^/]*)/i) ?? block.match(/Value:\s*(\$[\d,]+[^/\n]*)/i);
-    const effM = firstLine.match(/Effective\s*Date:\s*([\d/]+)/i)
-      ?? block.match(/Effective\s*Date:\s*([\d/]+)/i);
+    const yearM = firstLine.match(/Year:?\s+(\d{1,2},?\d{3}|\d{4})/i) ?? block.match(/Year:?\s+(\d{1,2},?\d{3}|\d{4})/i);
+    const descM = firstLine.match(/Description:?\s+([^/\n]+)/i) ?? block.match(/Description:?\s+([^/\n]+)/i);
+    const valueM = firstLine.match(/Value:?\s+(\$[\d,]+[^/]*)/i) ?? block.match(/Value:?\s+(\$[\d,]+[^/\n]*)/i);
+    const effM = firstLine.match(/Effective\s*Date:?\s+([\d/]+)/i)
+      ?? block.match(/Effective\s*Date:?\s+([\d/]+)/i);
     return {
       type: 'REMOVE_VEHICLE',
       rawText: block,
@@ -264,8 +272,20 @@ function parseBlock(block: string): Command | null {
   }
 
   // ── Remove Driver ─────────────────────────────────────────────────────────
-  if (/^Remove\s+Driver/i.test(firstLine)) {
-    const d = parseDriverLine(firstLine);
+  if (/^(?:Remove|Delete)\s+Driver/i.test(firstLine)) {
+    // Try single-line format first, then multi-line field extraction
+    let d = parseDriverLine(firstLine);
+    if (!d) {
+      const cdlM =
+        block.match(/CDL:\s*([\w]+)\s*\((\w{2})\)/i) ??
+        block.match(/CDL:\s*([\w]+)\s+([A-Z]{2})\b/i);
+      const firstName = field(block, 'Name');
+      const lastName = field(block, 'Last\\s*Name');
+      const dob = field(block, 'DOB');
+      if (firstName && lastName && cdlM && dob) {
+        d = { firstName, lastName, cdl: cdlM[1].trim(), cdlState: cdlM[2].trim(), dob };
+      }
+    }
     return {
       type: 'REMOVE_DRIVER',
       rawText: block,
@@ -273,9 +293,19 @@ function parseBlock(block: string): Command | null {
     };
   }
 
+  // ── Remove Holder ──────────────────────────────────────────────────────────
+  if (/^(?:Remove|Delete)\s+Holder/i.test(firstLine)) {
+    const holderName = field(block, "Holder'?s?\\s*Name") ?? field(block, 'Holder') ?? '';
+    return {
+      type: 'REMOVE_HOLDER',
+      rawText: block,
+      holderName,
+    };
+  }
+
   // ── Add Additional Insured & Waiver of Subrogation ────────────────────────
   if (/^Add\s+Additional\s+Insured\s*&\s*Waiver\s+of\s+Subrogation/i.test(firstLine)) {
-    const polPart = firstLine.match(/to\s+the\s+(.+)/i)?.[1] ?? '';
+    const polPart = firstLine.match(/to\s+(?:the\s+)?(.+)/i)?.[1] ?? '';
     return {
       type: 'ADD_AI_AND_WOS',
       rawText: block,
@@ -286,7 +316,7 @@ function parseBlock(block: string): Command | null {
 
   // ── Add Additional Insured ────────────────────────────────────────────────
   if (/^Add\s+Additional\s+Insured/i.test(firstLine)) {
-    const polPart = firstLine.match(/to\s+the\s+(.+)/i)?.[1] ?? '';
+    const polPart = firstLine.match(/to\s+(?:the\s+)?(.+)/i)?.[1] ?? '';
     return {
       type: 'ADD_ADDITIONAL_INSURED',
       rawText: block,
@@ -297,7 +327,7 @@ function parseBlock(block: string): Command | null {
 
   // ── Add Waiver of Subrogation ─────────────────────────────────────────────
   if (/^Add\s+Waiver\s+of\s+Subrogation/i.test(firstLine)) {
-    const polPart = firstLine.match(/to\s+the\s+(.+)/i)?.[1] ?? '';
+    const polPart = firstLine.match(/to\s+(?:the\s+)?(.+)/i)?.[1] ?? '';
     return {
       type: 'ADD_WAIVER_SUBROGATION',
       rawText: block,
@@ -320,7 +350,7 @@ function parseBlock(block: string): Command | null {
     return {
       type: 'ADD_NOTE_TO_MASTER',
       rawText: block,
-      note: field(block, 'Note') ?? '',
+      note: normalizeNote(field(block, 'Note')) ?? '',
     };
   }
 
@@ -344,7 +374,7 @@ function parseBlock(block: string): Command | null {
       vin: vinM?.[1]?.trim() ?? '',
       holderName: field(block, "Holder'?s? ?name") ?? field(block, 'Holder name') ?? '',
       updateTo: field(block, 'Update to') ?? '',
-      note: field(block, 'Note') ?? undefined,
+      note: normalizeNote(field(block, 'Note')),
     };
   }
 
@@ -355,7 +385,7 @@ function parseBlock(block: string): Command | null {
       rawText: block,
       holderName: field(block, "Holder'?s? ?name") ?? field(block, 'Holder name') ?? '',
       updateTo: field(block, 'Update to') ?? '',
-      note: field(block, 'Note') ?? undefined,
+      note: normalizeNote(field(block, 'Note')),
     };
   }
 
@@ -473,7 +503,13 @@ function parseBlock(block: string): Command | null {
 export function parseEmail(raw: RawEmail): ParsedEmail {
   const { clientName, usdot, dba } = parseSubject(raw.subject);
 
-  const blocks = splitCommandBlocks(raw.body);
+  // Ignore everything after "***" — those are internal notes, not commands
+  // Also ignore everything after "NOTAS ADICIONALES" / "ADDITIONAL NOTES" markers
+  let commandBody = raw.body.replace(/\*{3,}[\s\S]*$/, '');
+  commandBody = commandBody.replace(/[-=_*]*\s*NOTAS?\s+ADICIONALES?[\s\S]*$/i, '');
+  commandBody = commandBody.replace(/[-=_*]*\s*ADDITIONAL\s+NOTES?[\s\S]*$/i, '');
+  commandBody = commandBody.trim();
+  const blocks = splitCommandBlocks(commandBody);
   const commands: Command[] = [];
 
   for (const block of blocks) {

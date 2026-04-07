@@ -38,12 +38,32 @@ async function resolveVehicleEditUrl(page: Page, vin: string): Promise<string> {
   return buildNowCertsUrl(`/Vehicles/Edit.aspx?Id=${vehicleId}&Return=Details&TruckingCompanyId=${insuredId}`);
 }
 
+/**
+ * Normalizes the value field while preserving any trailing text (e.g. notes).
+ * Examples:
+ *   "19580" -> "19,580"
+ *   "19,580" -> "19,580"
+ *   "19,580 Including Permanently Attached Equip" -> "19,580 Including Permanently Attached Equip"
+ *   "$19,580.00 with notes" -> "19,580.00 with notes"
+ */
 function normalizePrice(value: string): string {
-  const digits = value.replace(/[^0-9.]/g, '');
-  if (!digits) return '';
-  const [whole, decimals] = digits.split('.');
-  const withComma = Number(whole).toLocaleString('en-US');
-  return decimals ? `${withComma}.${decimals}` : withComma;
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+
+  // Try to extract the leading number (allowing $, commas, decimals) and the rest as text
+  const match = trimmed.match(/^\$?\s*([\d,]+(?:\.\d+)?)\s*(.*)$/);
+  if (!match) return trimmed;
+
+  const numericPart = match[1].replace(/,/g, '');
+  const restText = match[2].trim();
+
+  if (!numericPart) return trimmed;
+
+  const [whole, decimals] = numericPart.split('.');
+  const formatted = Number(whole).toLocaleString('en-US');
+  const formattedNumber = decimals ? `${formatted}.${decimals}` : formatted;
+
+  return restText ? `${formattedNumber} ${restText}` : formattedNumber;
 }
 
 /**

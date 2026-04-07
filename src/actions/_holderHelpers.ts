@@ -6,7 +6,7 @@ import { Page, Locator } from 'playwright';
 import { HolderInfo } from '../types';
 import { logger } from '../utils/logger';
 import { config } from '../config/config';
-import { getInsuredUrl, escapeRegex, STATE_NAMES, toFullStateName } from './_base';
+import { getInsuredUrl, escapeRegex, STATE_NAMES, toFullStateName, parseUSAddress } from './_base';
 import fs from 'fs';
 import path from 'path';
 
@@ -98,11 +98,7 @@ export async function searchOrCreateHolder(page: Page, holder: HolderInfo): Prom
   await companyNameInput.fill(holder.name);
 
   // Parse address into components
-  const parts = holder.address.split(',').map(s => s.trim());
-  const address1 = parts[0] ?? '';
-  const city = parts[1] ?? '';
-  const state = parts[2] ?? '';
-  const zip = parts[3] ?? '';
+  const { line1: address1, city, state, zip } = parseUSAddress(holder.address);
 
   if (address1) {
     const addr1 = page.locator('input[placeholder="Address Line 1"]').first();
@@ -117,6 +113,29 @@ export async function searchOrCreateHolder(page: Page, holder: HolderInfo): Prom
   if (zip) {
     const zipInput = page.locator('input[placeholder="Zip/Postal Code"]').first();
     await zipInput.fill(zip).catch(() => page.fill('input[placeholder="Zip/Postal Code"]', zip));
+  }
+}
+
+/**
+ * Writes a note into the "Description of Operations" textarea robustly.
+ * Uses evaluate to set the value (handles long text and special characters
+ * better than fill() in Angular forms), then verifies and falls back to fill().
+ */
+export async function writeDescriptionOfOperations(page: Page, note: string): Promise<void> {
+  const descField = page.locator('textarea[placeholder="Description of Operations"]').first();
+  await descField.waitFor({ state: 'visible', timeout: 10_000 }).catch(() => {});
+
+  await descField.evaluate((el: any, value: string) => {
+    el.value = value;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }, note);
+
+  // Verify the value was set, retry with fill if not
+  const written = await descField.inputValue().catch(() => '');
+  if (written !== note) {
+    logger.warn('writeDescriptionOfOperations: evaluate did not set full value, retrying with fill...');
+    await descField.fill(note);
   }
 }
 
@@ -254,21 +273,29 @@ export async function selectNgMultiOption(page: Page, index: number, value: stri
   if (await selects.count() <= index) return false;
 
   const select = selects.nth(index);
-  await select.click({ force: true });
-  await page.waitForTimeout(600);
 
-  const option = page.locator('ng-dropdown-panel .ng-option').filter({
-    hasText: new RegExp(escapeRegex(value), 'i'),
-  }).first();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await select.click({ force: true });
+    await page.waitForTimeout(800 + attempt * 400); // Increase wait on each retry
 
-  if (await option.count() === 0) {
+    const option = page.locator('ng-dropdown-panel .ng-option').filter({
+      hasText: new RegExp(escapeRegex(value), 'i'),
+    }).first();
+
+    if (await option.count() > 0 && await option.isVisible().catch(() => false)) {
+      await option.click({ force: true });
+      await page.waitForTimeout(300);
+      return true;
+    }
+
+    // Options didn't appear — close dropdown and retry
+    logger.debug(`selectNgMultiOption: attempt ${attempt + 1} — no option "${value}" visible, retrying...`);
     await page.keyboard.press('Escape').catch(() => {});
-    return false;
+    await page.waitForTimeout(500);
   }
 
-  await option.click({ force: true });
-  await page.waitForTimeout(300);
-  return true;
+  logger.warn(`selectNgMultiOption: option "${value}" not found after 3 attempts`);
+  return false;
 }
 
 /**
