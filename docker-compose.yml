@@ -1,0 +1,18 @@
+services:
+  bot-endosos:
+    build: .
+    container_name: bot-endosos
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - HEADLESS=true
+      - TZ=America/Chicago
+    volumes:
+      # Persistir descargas y logs en el host
+      - ./downloads:/app/downloads
+      - ./logs:/app/logs
+      # Permitir editar agents.xlsx sin rebuild
+      - ./data:/app/data
+    # Aumentar shm size para Chromium (evita crashes con páginas pesadas)
+    shm_size: '2gb'

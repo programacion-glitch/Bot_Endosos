@@ -1,0 +1,16 @@
+node_modules
+dist
+.git
+.gitignore
+.env.example
+.history
+.playwright-mcp
+.claude
+logs
+downloads
+*.log
+*.md
+README*
+tests
+test_*.ts
+manual_email_*.json
