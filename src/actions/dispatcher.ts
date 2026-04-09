@@ -104,13 +104,23 @@ export async function dispatchCommands(
       if (shotPath) result.errorScreenshot = shotPath;
     }
 
-    // After CREATE_INSURED succeeds, capture the new insured ID for subsequent commands
+    // After CREATE_INSURED succeeds, capture the new insured ID for subsequent commands.
+    // NowCerts may take a moment to finish redirecting after the save, so we retry a few times.
     if (command.type === 'CREATE_INSURED' && result.success && !insuredId) {
-      try {
-        insuredId = getInsuredIdFromUrl(page);
-        logger.info(`Captured new insured ID: ${insuredId}`);
-      } catch {
-        logger.warn('Could not capture insured ID after CREATE_INSURED');
+      for (let attempt = 1; attempt <= 5; attempt++) {
+        try {
+          insuredId = getInsuredIdFromUrl(page);
+          logger.info(`Captured new insured ID: ${insuredId}`);
+          break;
+        } catch {
+          if (attempt < 5) {
+            logger.info(`Could not capture insured ID yet (attempt ${attempt}/5), waiting for redirect...`);
+            await page.waitForTimeout(2000);
+          }
+        }
+      }
+      if (!insuredId) {
+        logger.warn(`Could not capture insured ID after CREATE_INSURED. Current URL: ${page.url()}`);
       }
     }
 

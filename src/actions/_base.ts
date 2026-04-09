@@ -117,15 +117,32 @@ export function safeFilenamePart(raw: string): string {
 
 /**
  * Extracts the Insured UUID from the current page URL.
- * Expects the page to be on any /AMSINS/Insureds/Details/{id}/... route.
- * Falls back to navigating to the client's Information page if needed.
+ * Tries multiple URL patterns where NowCerts may put the insured ID:
+ *   /AMSINS/Insureds/Details/{id}/...
+ *   /AMSINS/Insureds/Edit/{id}
+ *   /AMSINS/Insureds/Configurator/.../Edit/{id}
+ *   ?Id={id} query parameter
+ *   ?TruckingCompanyId={id} query parameter
+ *   /TruckingCompanies/Edit.aspx?Id={id}
  */
 export function getInsuredIdFromUrl(page: Page): string {
-  const match = page.url().match(/\/AMSINS\/Insureds\/Details\/([0-9a-f-]{36})/i);
-  if (!match?.[1]) {
-    throw new Error(`Cannot extract insured ID from current URL: ${page.url()}`);
+  const url = page.url();
+  const uuidPattern = '[0-9a-f-]{36}';
+
+  const patterns = [
+    new RegExp(`/AMSINS/Insureds/Details/(${uuidPattern})`, 'i'),
+    new RegExp(`/AMSINS/Insureds/Edit/(${uuidPattern})`, 'i'),
+    new RegExp(`/AMSINS/Insureds/[A-Za-z]+/(${uuidPattern})`, 'i'),
+    new RegExp(`TruckingCompanyId=(${uuidPattern})`, 'i'),
+    new RegExp(`[?&]Id=(${uuidPattern})`, 'i'),
+  ];
+
+  for (const re of patterns) {
+    const match = url.match(re);
+    if (match?.[1]) return match[1];
   }
-  return match[1];
+
+  throw new Error(`Cannot extract insured ID from current URL: ${url}`);
 }
 
 /**

@@ -118,24 +118,39 @@ export async function searchOrCreateHolder(page: Page, holder: HolderInfo): Prom
 
 /**
  * Writes a note into the "Description of Operations" textarea robustly.
- * Uses evaluate to set the value (handles long text and special characters
- * better than fill() in Angular forms), then verifies and falls back to fill().
+ *
+ * Strategy (Angular forms are picky — use the slowest, most realistic input):
+ * 1. Click the textarea to focus it
+ * 2. Select all + delete to clear any existing value
+ * 3. Type the note character-by-character (pressSequentially)
+ * 4. Blur the field to trigger Angular's change detection
+ * 5. Verify the final value matches; if not, fall back to fill()
  */
 export async function writeDescriptionOfOperations(page: Page, note: string): Promise<void> {
   const descField = page.locator('textarea[placeholder="Description of Operations"]').first();
   await descField.waitFor({ state: 'visible', timeout: 10_000 }).catch(() => {});
+  await descField.scrollIntoViewIfNeeded().catch(() => {});
 
-  await descField.evaluate((el: any, value: string) => {
-    el.value = value;
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-  }, note);
+  // Click + select all + delete to fully clear the field
+  await descField.click({ force: true });
+  await page.keyboard.press('Control+A');
+  await page.keyboard.press('Delete');
+  await page.waitForTimeout(100);
 
-  // Verify the value was set, retry with fill if not
+  // Type character by character so Angular's keydown/input/keyup handlers fire properly
+  await descField.pressSequentially(note, { delay: 5 });
+  await page.waitForTimeout(200);
+
+  // Blur the field to trigger Angular's onBlur change detection
+  await descField.evaluate((el: any) => el.blur());
+  await page.waitForTimeout(200);
+
+  // Verify the full value was written
   const written = await descField.inputValue().catch(() => '');
   if (written !== note) {
-    logger.warn('writeDescriptionOfOperations: evaluate did not set full value, retrying with fill...');
+    logger.warn(`writeDescriptionOfOperations: typed value mismatch (got ${written.length}/${note.length} chars), retrying with fill...`);
     await descField.fill(note);
+    await descField.evaluate((el: any) => el.blur());
   }
 }
 

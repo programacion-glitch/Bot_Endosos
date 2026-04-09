@@ -14,6 +14,7 @@ import {
   waitForSaveConfirmation,
 } from './_base';
 import { selectRadComboByText } from './_policyHelpers';
+import { screenshot } from '../browser/browserManager';
 
 function normalizeDateValue(value: string): string {
   const parts = value.split(/[^\d]/).filter(Boolean);
@@ -44,23 +45,52 @@ function getPriorALPolicyNumber(commands: Command[], currentCommand: AddVehicleC
   return null;
 }
 
+/**
+ * Result of looking up the AL policy for the ID Card.
+ * - `policyNumber`: the policy number if found
+ * - `noPolicyFound`: true if there's no AL policy at all (skip ID Card, valid case)
+ * - `lookupFailed`: true if NowCerts didn't load (cannot determine, should be reported as failure)
+ */
+type IdCardPolicyLookup = {
+  policyNumber: string | null;
+  noPolicyFound: boolean;
+  lookupFailed: boolean;
+  error?: string;
+};
+
 async function resolveIdCardPolicyNumber(
   page: Page,
   cmd: AddVehicleCommand,
   commands: Command[]
-): Promise<string | null> {
+): Promise<IdCardPolicyLookup> {
   // 1. Check if an AL policy was added in the current email
   const priorALPolicyNumber = getPriorALPolicyNumber(commands, cmd);
   if (priorALPolicyNumber) {
-    return priorALPolicyNumber;
+    return { policyNumber: priorALPolicyNumber, noPolicyFound: false, lookupFailed: false };
   }
 
   // 2. Search for an existing AL policy (Commercial Auto) on the insured's policies page
-  try {
-    const policiesUrl = getInsuredUrl(page, 'Policies');
-    await page.goto(policiesUrl, { waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(3000);
+  // Retry navigation up to 2 times since NowCerts can be slow to load
+  const policiesUrl = getInsuredUrl(page, 'Policies');
+  let navError: string | null = null;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      await page.goto(policiesUrl, { waitUntil: 'domcontentloaded', timeout: 180_000 });
+      await page.waitForTimeout(3000);
+      navError = null;
+      break;
+    } catch (err) {
+      navError = (err as Error).message;
+      logger.warn(`resolveIdCardPolicyNumber: navigation to Policies failed (attempt ${attempt}/2): ${navError}`);
+      if (attempt < 2) await page.waitForTimeout(5000);
+    }
+  }
 
+  if (navError) {
+    return { policyNumber: null, noPolicyFound: false, lookupFailed: true, error: `Could not load Policies page: ${navError}` };
+  }
+
+  try {
     // Find rows in the policies grid that have "Commercial Auto" in the Lines of Business column
     const rows = page.locator('[role="grid"] [role="row"]');
     const rowCount = await rows.count();
@@ -69,43 +99,82 @@ async function resolveIdCardPolicyNumber(
       const row = rows.nth(i);
       const lobCell = row.locator('[role="gridcell"]').filter({ hasText: /Commercial\s*Auto/i }).first();
       if (await lobCell.count() > 0) {
-        // Get the policy number from the link in the same row
         const policyLink = row.locator('[role="gridcell"] a[href*="/Policies/Details/"]').first();
         if (await policyLink.count() > 0) {
           const policyNumber = (await policyLink.textContent() ?? '').trim();
           if (policyNumber) {
             logger.info(`Found existing AL policy in NowCerts: ${policyNumber}`);
-            return policyNumber;
+            return { policyNumber, noPolicyFound: false, lookupFailed: false };
           }
         }
       }
     }
 
     logger.info(`createIDCard: no existing AL policy found for VIN ${cmd.vin}`);
+    return { policyNumber: null, noPolicyFound: true, lookupFailed: false };
   } catch (err) {
-    logger.warn(`Could not search for existing AL policy: ${(err as Error).message}`);
+    return { policyNumber: null, noPolicyFound: false, lookupFailed: true, error: (err as Error).message };
   }
-
-  return null;
 }
 
+/**
+ * Clicks an ant-select dropdown by index and selects an option matching `matcher`.
+ *
+ * Strategy: ant-select dropdowns can be slow to populate. We retry up to 4 times,
+ * toggling the dropdown off/on between attempts to force the data to reload.
+ */
 async function selectAntOption(page: Page, selectIndex: number, matcher: RegExp): Promise<void> {
   const select = page.locator('.ant-select').nth(selectIndex);
-  await select.click({ force: true }).catch(async () => {
-    await select.evaluate((el: any) => el.click());
-  });
-  await page.waitForTimeout(400);
+  await select.scrollIntoViewIfNeeded().catch(() => {});
 
-  const option = page.locator('.ant-select-dropdown .ant-select-item-option').filter({ hasText: matcher }).first();
-  if (await option.count() === 0) {
-    throw new Error(`ID Card option not found: ${matcher}`);
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    // Open the dropdown
+    await select.click({ force: true }).catch(async () => {
+      await select.evaluate((el: any) => el.click());
+    });
+    // Progressive wait: 1.5s, 2.5s, 3.5s, 4.5s
+    await page.waitForTimeout(500 + attempt * 1000);
+
+    // Look for any options at all in the dropdown
+    const allOptions = page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option');
+    const optionCount = await allOptions.count();
+
+    // Filter out empty options (placeholders / loading states)
+    const allTexts = optionCount > 0 ? await allOptions.allTextContents() : [];
+    const nonEmptyCount = allTexts.filter(t => t.trim().length > 0).length;
+
+    logger.info(`selectAntOption[${selectIndex}]: attempt ${attempt}/4 — found ${optionCount} options (${nonEmptyCount} non-empty)${nonEmptyCount > 0 ? ': ' + allTexts.filter(t => t.trim()).slice(0, 3).map(t => `"${t.trim()}"`).join(', ') : ''}`);
+
+    if (nonEmptyCount === 0) {
+      logger.warn(`selectAntOption[${selectIndex}]: dropdown empty on attempt ${attempt}/4, toggling off/on...`);
+      await page.keyboard.press('Escape').catch(() => {});
+      await page.waitForTimeout(500);
+      await page.locator('body').click({ position: { x: 5, y: 5 }, force: true }).catch(() => {});
+      await page.waitForTimeout(500);
+      continue;
+    }
+
+    // Try to find the matching option
+    const option = allOptions.filter({ hasText: matcher }).first();
+    if (await option.count() === 0) {
+      logger.warn(`selectAntOption[${selectIndex}]: no option matching ${matcher} on attempt ${attempt}/4, retrying...`);
+      await page.keyboard.press('Escape').catch(() => {});
+      await page.waitForTimeout(500);
+      await page.locator('body').click({ position: { x: 5, y: 5 }, force: true }).catch(() => {});
+      await page.waitForTimeout(500);
+      continue;
+    }
+
+    // Found it — click and finish
+    await option.click({ force: true }).catch(async () => {
+      await option.evaluate((el: any) => el.click());
+    });
+    await page.waitForTimeout(500);
+    await page.keyboard.press('Escape').catch(() => {});
+    return;
   }
 
-  await option.click({ force: true }).catch(async () => {
-    await option.evaluate((el: any) => el.click());
-  });
-  await page.waitForTimeout(500);
-  await page.keyboard.press('Escape').catch(() => {});
+  throw new Error(`ID Card option not found after 4 attempts: ${matcher}`);
 }
 
 /**
@@ -404,11 +473,40 @@ export async function addVehicle(
     await waitForSaveConfirmation(page);
 
     const files: string[] = [];
-    const idCardPolicyNumber = await resolveIdCardPolicyNumber(page, cmd, commands);
-    if (idCardPolicyNumber) {
-      const idCardFile = await createIDCard(page, cmd.vin, cmd.effectiveDate, idCardPolicyNumber);
-      if (idCardFile) files.push(idCardFile);
+    const lookup = await resolveIdCardPolicyNumber(page, cmd, commands);
+
+    // Case 1: lookup failed (NowCerts didn't load) — report as partial failure with screenshot
+    if (lookup.lookupFailed) {
+      const shotPath = await screenshot(page, `idcard_lookup_fail_${cmd.vin.slice(-4)}`).catch(() => undefined);
+      const result = fail(
+        'ADD_VEHICLE',
+        `Vehicle VIN ${cmd.vin} was added, but could not verify if AL policy exists: ${lookup.error ?? 'unknown'}. ID Card was not created.`,
+        new Error(lookup.error ?? 'Policy lookup failed')
+      );
+      if (shotPath) result.errorScreenshot = shotPath;
+      result.downloadedFiles = files;
+      return result;
     }
+
+    // Case 2: AL policy found — try to create the ID Card
+    if (lookup.policyNumber) {
+      const idCardResult = await createIDCard(page, cmd.vin, cmd.effectiveDate, lookup.policyNumber);
+      if (idCardResult.file) {
+        files.push(idCardResult.file);
+      } else {
+        // ID Card was expected but failed — capture screenshot and report partial failure
+        const shotPath = await screenshot(page, `idcard_fail_${cmd.vin.slice(-4)}`).catch(() => undefined);
+        const result = fail(
+          'ADD_VEHICLE',
+          `Vehicle VIN ${cmd.vin} was added, but ID Card creation failed: ${idCardResult.error ?? 'unknown error'}`,
+          new Error(idCardResult.error ?? 'ID Card creation failed')
+        );
+        if (shotPath) result.errorScreenshot = shotPath;
+        result.downloadedFiles = files;
+        return result;
+      }
+    }
+    // Case 3: noPolicyFound — vehicle added without ID Card, that's a valid scenario
 
     return ok('ADD_VEHICLE', `Vehicle VIN ${cmd.vin} added successfully.`, files);
   } catch (err) {
@@ -432,10 +530,19 @@ async function attemptCreateIDCard(
   await openIdCardTemplate(page);
   await openFormData(page);
 
-  await page.locator('#dataSource_formName').fill(targetName);
-
+  // Select policy and vehicle FIRST — selecting them may auto-regenerate the form name,
+  // so we set the name AFTER to ensure it sticks.
   await selectAntOption(page, 0, new RegExp(`^${escapeRegex(policyNumber)}\\b`, 'i'));
   await selectAntOption(page, 1, new RegExp(escapeRegex(vin), 'i'));
+
+  // Now overwrite the form name with our target (e.g. "ID CARD VIN# 0022")
+  const formNameInput = page.locator('#dataSource_formName');
+  await formNameInput.click({ force: true }).catch(() => {});
+  await page.keyboard.press('Control+A');
+  await page.keyboard.press('Delete');
+  await formNameInput.pressSequentially(targetName, { delay: 5 });
+  await formNameInput.evaluate((el: any) => el.blur()).catch(() => {});
+  await page.waitForTimeout(300);
 
   const policyNumberField = page.locator('input[name="F[0].P1[0].Policy_PolicyNumberIdentifier_A[0]"]').first();
   const effectiveDateField = page.locator('input[name="F[0].P1[0].Policy_EffectiveDate_A[0]"]').first();
@@ -475,6 +582,13 @@ async function attemptCreateIDCard(
 }
 
 /**
+ * Result of an ID Card creation attempt.
+ * - `file`: path to the downloaded PDF on success
+ * - `error`: human-readable error message on failure
+ */
+type IdCardResult = { file: string | null; error?: string };
+
+/**
  * Creates an ID Card for the newly added vehicle.
  * Retries up to 3 times if the ID Card creation fails (e.g. Form Data panel doesn't open).
  * The vehicle is already created — only the ID Card is retried.
@@ -484,7 +598,7 @@ async function createIDCard(
   vin: string,
   effectiveDate: string,
   policyNumber: string
-): Promise<string | null> {
+): Promise<IdCardResult> {
   const last4 = vin.slice(-4);
   const today = todayYYYYMMdd();
   const targetName = `ID CARD VIN# ${last4}`;
@@ -501,12 +615,15 @@ async function createIDCard(
     insuredId = match?.[1] ?? '';
   }
 
+  let lastError = '';
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     logger.info(`Creating ID Card for VIN: ${vin} using policy ${policyNumber} (attempt ${attempt}/${MAX_RETRIES})`);
     try {
-      return await attemptCreateIDCard(page, vin, effectiveDate, policyNumber, last4, today, targetName);
+      const file = await attemptCreateIDCard(page, vin, effectiveDate, policyNumber, last4, today, targetName);
+      return { file };
     } catch (err) {
-      logger.error(`ID Card attempt ${attempt}/${MAX_RETRIES} failed for VIN ${vin}: ${(err as Error).message}`);
+      lastError = (err as Error).message;
+      logger.error(`ID Card attempt ${attempt}/${MAX_RETRIES} failed for VIN ${vin}: ${lastError}`);
       if (attempt < MAX_RETRIES) {
         logger.info(`Retrying ID Card creation for VIN ${vin}...`);
         // Navigate back to insured's PdfForms using the captured ID
@@ -520,7 +637,7 @@ async function createIDCard(
   }
 
   logger.error(`Failed to create ID Card for VIN ${vin} after ${MAX_RETRIES} attempts`);
-  return null;
+  return { file: null, error: `Failed after ${MAX_RETRIES} attempts: ${lastError}` };
 }
 
 export async function createIDCardForExistingVehicle(
@@ -529,5 +646,6 @@ export async function createIDCardForExistingVehicle(
   effectiveDate: string,
   policyNumber: string
 ): Promise<string | null> {
-  return createIDCard(page, vin, effectiveDate, policyNumber);
+  const result = await createIDCard(page, vin, effectiveDate, policyNumber);
+  return result.file;
 }
