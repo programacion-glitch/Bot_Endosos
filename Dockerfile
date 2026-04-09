@@ -1,31 +1,47 @@
-# Imagen oficial de Playwright con Node 20 y Chromium + todas las dependencias del sistema
-# Esta imagen ya incluye fonts, codecs, libs de audio/video, etc. que Chromium necesita.
+# syntax=docker/dockerfile:1.6
+
+# ---------- Builder: compila TypeScript y prepara node_modules ----------
+FROM mcr.microsoft.com/playwright:v1.58.2-jammy AS builder
+
+WORKDIR /app
+
+# La imagen base ya trae Chromium en /ms-playwright; evitamos que npm lo vuelva a bajar.
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+
+# Instalar TODAS las deps (incluidas dev) para poder compilar con tsc
+COPY package.json package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci
+
+# Compilar TS -> dist/
+COPY tsconfig.json ./
+COPY src ./src
+RUN npx tsc
+
+# Dejar solo deps de producción para copiar un node_modules limpio al runtime
+RUN --mount=type=cache,target=/root/.npm \
+    npm prune --omit=dev
+
+
+# ---------- Runtime: imagen mínima para ejecutar el bot ----------
 FROM mcr.microsoft.com/playwright:v1.58.2-jammy
 
-# Zona horaria
-ENV TZ=America/Chicago
+ENV TZ=America/Chicago \
+    HEADLESS=true \
+    NODE_ENV=production \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 WORKDIR /app
 
-# Instalar dependencias primero (mejor caching de Docker)
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
-
-# Copiar dev deps necesarias para ts-node en runtime
-RUN npm install --no-save typescript ts-node @types/node
-
-# Copiar el resto del código fuente
-COPY tsconfig.json ./
-COPY src ./src
+# Copiar artefactos del builder
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+COPY package.json ./
 COPY data ./data
 
-# Crear carpetas runtime
+# Crear carpetas runtime (las sobrescriben los volúmenes de docker-compose)
 RUN mkdir -p logs/screenshots downloads
 
-# Forzar headless en contenedor
-ENV HEADLESS=true
-ENV NODE_ENV=production
-
-# Comando por defecto: ejecutar el bot en modo polling (escucha emails)
-CMD ["npx", "ts-node", "src/main.ts"]
+# Ejecutar JS compilado directamente (sin ts-node)
+CMD ["node", "dist/main.js"]
