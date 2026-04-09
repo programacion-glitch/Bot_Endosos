@@ -10,13 +10,13 @@
     "lint": "eslint src/**/*.ts"
   },
   "dependencies": {
-    "@playwright/test": "^1.41.0",
+    "@playwright/test": "1.58.2",
     "dotenv": "^16.4.1",
     "exceljs": "^4.4.0",
     "imap-simple": "^5.1.0",
     "mailparser": "^3.7.1",
     "nodemailer": "^6.9.9",
-    "playwright": "^1.41.0",
+    "playwright": "1.58.2",
     "winston": "^3.11.0"
   },
   "devDependencies": {

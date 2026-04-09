@@ -1,6 +1,6 @@
 # Imagen oficial de Playwright con Node 20 y Chromium + todas las dependencias del sistema
 # Esta imagen ya incluye fonts, codecs, libs de audio/video, etc. que Chromium necesita.
-FROM mcr.microsoft.com/playwright:v1.41.0-jammy
+FROM mcr.microsoft.com/playwright:v1.58.2-jammy
 
 # Zona horaria
 ENV TZ=America/Chicago
