@@ -163,7 +163,10 @@ export async function downloadCertificate(
   page: Page,
   filename: string,
   holderName?: string,
-  description?: string
+  description?: string,
+  /** Si se pasa, el dropdown de Vehicles queda con SOLO el item que contenga ese VIN.
+   *  Los Drivers siempre se marcan todos. */
+  onlyVehicleVin?: string
 ): Promise<string[]> {
   // Esperar a que la grilla refleje el holder recién guardado antes de abrir Actions.
   // La fila puede tardar unos segundos en aparecer después del Save aunque
@@ -176,20 +179,41 @@ export async function downloadCertificate(
     await page.waitForTimeout(1000);
   }
 
+  // IMPORTANTE: la grilla expandida de Lien Holders crea dos TRs que matchean
+  // el holderName: el wrapper k-detail-row y el TR interno del holder. Queremos
+  // siempre el TR interno (no k-detail-row) para que el Actions → Send Certificate
+  // se dispare en el menú del holder, no en otro contexto.
   const row = holderName
-    ? page.locator('tr').filter({ hasText: new RegExp(escapeRegex(holderName), 'i') }).first()
+    ? page.locator('tr:not(.k-detail-row)').filter({ hasText: new RegExp(escapeRegex(holderName), 'i') }).first()
     : page.locator('tr').first();
 
-  const actions = row.locator('button,span,a').filter({ hasText: /Actions/i }).first();
+  const actions = row.locator('span.ncm-menu-grid-actions-button').first();
   await actions.click({ force: true });
   await page.waitForTimeout(1000);
-  await page.locator('li, a, span').filter({ hasText: /^Send Certificate$/i }).first().click({ force: true });
+  // IMPORTANTE: usar `li.k-item` en vez de `li, a, span` porque existe un link
+  // <a class="title-bar-btn"> "Send Certificate" en el header del insured que,
+  // al clickarse, navega a /CertificateHolders/Details.aspx SIN Id/addInsId/VehicleId,
+  // abriendo el modal sin contexto de holder (Certificate Holder field vacío).
+  // El ítem del menú Kendo del row del holder es `li.k-item`.
+  await page.locator('li.k-item').filter({ hasText: /^Send Certificate$/i }).first().click({ force: true });
 
   // Esperar a que el modal de Send Certificate esté completamente cargado (no sólo un timeout fijo).
   await page.waitForSelector('#ctl00_ContentPlaceHolder1_btnPreviewCertificate_input', { state: 'visible', timeout: 20_000 }).catch(() => {});
-  await page.waitForTimeout(2500);
+  // Margen explícito de 3s antes de cualquier interacción (checkboxes, preview)
+  // para dar tiempo a que todos los comboboxes (vehicles, drivers) terminen de poblarse.
+  logger.info('downloadCertificate: esperando 3s antes de interactuar con el modal Send Certificate');
+  await page.waitForTimeout(3000);
 
-  await checkAllCombo(page, 'ctl00_ContentPlaceHolder1_usrVehicles_ddlVehicles_Arrow', 'ctl00_ContentPlaceHolder1_usrVehicles_ddlVehicles_DropDown');
+  if (onlyVehicleVin) {
+    await checkOnlyMatchingInCombo(
+      page,
+      'ctl00_ContentPlaceHolder1_usrVehicles_ddlVehicles_Arrow',
+      'ctl00_ContentPlaceHolder1_usrVehicles_ddlVehicles_DropDown',
+      onlyVehicleVin
+    );
+  } else {
+    await checkAllCombo(page, 'ctl00_ContentPlaceHolder1_usrVehicles_ddlVehicles_Arrow', 'ctl00_ContentPlaceHolder1_usrVehicles_ddlVehicles_DropDown');
+  }
   await checkAllCombo(page, 'ctl00_ContentPlaceHolder1_usrDrivers_ddlDrivers_Arrow', 'ctl00_ContentPlaceHolder1_usrDrivers_ddlDrivers_DropDown');
 
   if (description?.trim()) {
@@ -219,6 +243,60 @@ export async function downloadCertificate(
   return [filePath];
 }
 
+/**
+ * Abre un RadComboBox multi-select y deja marcado SOLO el item cuyo texto contiene
+ * la substring dada (case-insensitive). Los demás items quedan desmarcados.
+ * Útil para seleccionar un vehículo específico por VIN en Send Certificate.
+ */
+async function checkOnlyMatchingInCombo(page: Page, arrowId: string, dropdownId: string, matchText: string): Promise<void> {
+  const arrow = page.locator(`#${arrowId}`).first();
+  if (await arrow.count() === 0) return;
+
+  // Abrir dropdown
+  await arrow.click({ force: true }).catch(async () => {
+    await arrow.evaluate((el: any) => el.click());
+  });
+  await page.waitForTimeout(600);
+
+  // Ajustar selección: marcar solo el item que matchea, desmarcar los demás.
+  // Cada item tiene estructura: <li.rcbItem><label><input type="checkbox">TEXT</label></li>
+  // Click en <li> NO marca el checkbox — hay que click en el <label> (o en el input directo).
+  const result = await page.evaluate(
+    ({ dropdownId, matchText }) => {
+      const doc = (globalThis as any).document;
+      const dd = doc?.getElementById?.(dropdownId);
+      if (!dd) return { ok: false, reason: 'dropdown-not-found', matched: 0, total: 0 };
+      const items = dd.querySelectorAll('li.rcbItem');
+      let matched = 0;
+      const needle = matchText.toLowerCase();
+      items.forEach((li: any) => {
+        const txt = (li.textContent || '').toLowerCase();
+        const shouldBeChecked = txt.includes(needle);
+        const cb = li.querySelector('input[type="checkbox"]');
+        const label = li.querySelector('label');
+        if (!cb) return;
+        if (cb.checked !== shouldBeChecked) {
+          if (label) label.click();
+          else cb.click();
+        }
+        if (shouldBeChecked) matched++;
+      });
+      return { ok: matched > 0, reason: matched > 0 ? 'ok' : 'no-match', matched, total: items.length };
+    },
+    { dropdownId, matchText }
+  );
+
+  if (!result.ok) {
+    logger.warn(`checkOnlyMatchingInCombo: ${result.reason} para "${matchText}" (${result.matched}/${result.total} items)`);
+  } else {
+    logger.info(`checkOnlyMatchingInCombo: marcado ${result.matched} item(s) con "${matchText}" de ${result.total} totales`);
+  }
+
+  await page.waitForTimeout(300);
+  await page.keyboard.press('Escape').catch(() => {});
+  await page.waitForTimeout(250);
+}
+
 async function checkAllCombo(page: Page, arrowId: string, dropdownId: string): Promise<void> {
   const arrow = page.locator(`#${arrowId}`).first();
   if (await arrow.count() === 0) return;
@@ -228,10 +306,21 @@ async function checkAllCombo(page: Page, arrowId: string, dropdownId: string): P
   });
   await page.waitForTimeout(400);
 
-  const checkAll = page.locator(`#${dropdownId} .rcbCheckAllItemsCheckBox`).first();
-  if (await checkAll.count() > 0) {
-    await checkAll.evaluate((el: any) => el.click());
+  // El "Check All" vive dentro de <label><input class="rcbCheckAllItemsCheckBox">Check All</label>.
+  // Click en el <label> (padre) sí marca el checkbox y dispara el evento de Telerik.
+  const checkAllInput = page.locator(`#${dropdownId} .rcbCheckAllItemsCheckBox`).first();
+  if (await checkAllInput.count() > 0) {
+    const clicked = await checkAllInput.evaluate((el: any) => {
+      const label = el.closest('label') || el.parentElement;
+      if (label && label.tagName === 'LABEL') {
+        label.click();
+        return { via: 'label' };
+      }
+      el.click();
+      return { via: 'input' };
+    }).catch(() => ({ via: 'error' }));
     await page.waitForTimeout(300);
+    logger.info(`checkAllCombo: via=${clicked.via}`);
   }
 
   await page.keyboard.press('Escape').catch(() => {});
