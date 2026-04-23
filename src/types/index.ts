@@ -54,6 +54,7 @@ export interface CreateInsuredCommand extends BaseCommand {
   drivers: Driver[];
   phone: string;
   email: string;
+  secondaryEmail?: string;
 }
 
 export interface CreateMasterCommand extends BaseCommand {

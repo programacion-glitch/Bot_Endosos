@@ -10,24 +10,61 @@ let isLoggedIn = false;
 /**
  * Returns a page that is authenticated in NowCerts.
  * Reuses the existing page/session if still valid.
+ * If the page/browser is closed or unusable, automatically recreates it from scratch.
  */
 export async function getNowCertsPage(): Promise<Page> {
+  // Check if existing page is still usable
   if (activePage && isLoggedIn) {
-    // Verify the session is still alive
-    try {
-      await activePage.waitForLoadState('domcontentloaded', { timeout: 5000 });
-      const url = activePage.url();
-      if (!url.includes('Login') && url.includes('nowcerts.com')) {
-        return activePage;
+    const stillAlive = await isPageAlive(activePage);
+    if (stillAlive) {
+      try {
+        const url = activePage.url();
+        if (!url.includes('Login') && url.includes('nowcerts.com')) {
+          return activePage;
+        }
+      } catch {
+        // URL access failed — page is dead
       }
-    } catch {
-      logger.warn('Existing page seems stale, re-logging in...');
+    }
+    logger.warn('Existing NowCerts page is not usable, recreating...');
+    activePage = null;
+    isLoggedIn = false;
+  }
+
+  // Create a fresh page and login. Retry once if it fails (browser may be dead too).
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      activePage = await newPage();
+      await login(activePage);
+      return activePage;
+    } catch (err) {
+      logger.warn(`getNowCertsPage: attempt ${attempt}/2 failed: ${(err as Error).message}`);
+      // Kill the browser completely and try again fresh
+      activePage = null;
+      isLoggedIn = false;
+      try {
+        const { closeBrowser } = await import('./browserManager');
+        await closeBrowser();
+      } catch {
+        // ignore
+      }
+      if (attempt === 2) throw err;
     }
   }
 
-  activePage = await newPage();
-  await login(activePage);
-  return activePage;
+  throw new Error('getNowCertsPage: unreachable');
+}
+
+/** Returns true if the Playwright page is still connected and usable. */
+async function isPageAlive(page: Page): Promise<boolean> {
+  try {
+    if (page.isClosed()) return false;
+    const ctx = page.context();
+    if (!ctx.browser() || !ctx.browser()?.isConnected()) return false;
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function login(page: Page): Promise<void> {

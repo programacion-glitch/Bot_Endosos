@@ -1,7 +1,7 @@
 import { Page } from 'playwright';
 import { AddDriverCommand, ActionResult } from '../types';
 import { logger } from '../utils/logger';
-import { ok, fail, waitForSaveConfirmation, buildNowCertsUrl, getInsuredIdFromUrl, buildInsuredUrl, STATE_NAMES, toFullStateName } from './_base';
+import { ok, fail, waitForSaveConfirmation, buildNowCertsUrl, getInsuredIdFromUrl, buildInsuredUrl, STATE_NAMES, toFullStateName, escapeRegex } from './_base';
 
 async function selectNgSelect(page: Page, index: number, value: string): Promise<void> {
   const fullValue = value.length <= 3 ? toFullStateName(value) : value;
@@ -87,7 +87,31 @@ export async function addDriver(page: Page, cmd: AddDriverCommand): Promise<Acti
     await saveBtn.click({ force: true });
     await waitForSaveConfirmation(page);
 
-    return ok('ADD_DRIVER', `Driver ${driver.firstName} ${driver.lastName} added.`);
+    // ── Verify ───────────────────────────────────────────────────────────
+    // Wait 5s for NowCerts to commit, then reload the Drivers list and
+    // confirm the new driver appears. If not, return fail() instead of
+    // silently reporting success.
+    await page.waitForTimeout(5000);
+    const driversUrl2 = buildInsuredUrl(insuredId, 'Drivers');
+    await page.goto(driversUrl2, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(2000);
+
+    const namePattern = new RegExp(
+      `${escapeRegex(driver.firstName)}.*${escapeRegex(driver.lastName)}|${escapeRegex(driver.lastName)}.*${escapeRegex(driver.cdl)}`,
+      'i'
+    );
+    const matches = await page.locator('tbody tr').filter({ hasText: namePattern }).count();
+    if (matches === 0) {
+      return fail(
+        'ADD_DRIVER',
+        `Driver ${driver.firstName} ${driver.lastName} not visible in drivers list after save`
+      );
+    }
+
+    logger.info(
+      `addDriver: confirmed ${driver.firstName} ${driver.lastName} appears in drivers list`
+    );
+    return ok('ADD_DRIVER', `Driver ${driver.firstName} ${driver.lastName} added (verified).`);
   } catch (err) {
     return fail('ADD_DRIVER', (err as Error).message, err as Error);
   }

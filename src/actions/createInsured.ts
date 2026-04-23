@@ -175,8 +175,11 @@ export async function createInsured(
 
     // ── PRINCIPALS / CO-INSUREDS (Drivers) ───────────────────────────────────
 
+    logger.info(`createInsured: filling ${cmd.drivers.length} driver(s)`);
+
     for (let i = 0; i < cmd.drivers.length; i++) {
       const d = cmd.drivers[i];
+      logger.info(`createInsured: driver ${i + 1}/${cmd.drivers.length} — ${d.firstName} ${d.lastName} (CDL ${d.cdl} ${d.cdlState}, DOB ${d.dob})`);
 
       if (i > 0) {
         // Add a new row — the "+" is a span[title="Add"] next to DL State (NOT a <button>)
@@ -196,6 +199,8 @@ export async function createInsured(
       const rowCount   = await firstNames.count();
       const rowIdx     = Math.min(i, rowCount - 1);
 
+      // Make sure the row is visible before filling
+      await firstNames.nth(rowIdx).scrollIntoViewIfNeeded().catch(() => {});
       await firstNames.nth(rowIdx).fill(d.firstName);
       await lastNames.nth(rowIdx).fill(d.lastName);
 
@@ -209,19 +214,31 @@ export async function createInsured(
         );
       }
 
-      // Driver checkbox
+      // Driver checkbox — retry if it doesn't stay checked (Angular form can be slow)
       const driverCbs = page.locator('input[formcontrolname="isDriver"]');
       if (await driverCbs.count() > rowIdx) {
-        const isChecked = await driverCbs.nth(rowIdx).isChecked();
-        if (!isChecked) await driverCbs.nth(rowIdx).check();
-        await page.waitForTimeout(700); // wait for DL Number / DL State to appear
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          const isChecked = await driverCbs.nth(rowIdx).isChecked();
+          if (isChecked) break;
+          await driverCbs.nth(rowIdx).check({ force: true });
+          await page.waitForTimeout(800);
+        }
+        const finalChecked = await driverCbs.nth(rowIdx).isChecked();
+        if (!finalChecked) {
+          logger.warn(`createInsured: Driver checkbox for row ${i + 1} did not get checked`);
+        }
+        // Wait for DL Number / DL State to fully render
+        await page.locator('input[placeholder="DL Number"]').nth(rowIdx).waitFor({ state: 'visible', timeout: 10_000 }).catch(() => {});
       }
 
       // DL Number (appears after Driver checkbox)
       if (d.cdl) {
         const dlInputs = page.locator('input[placeholder="DL Number"]');
-        if (await dlInputs.count() > rowIdx) {
+        const dlCount = await dlInputs.count();
+        if (dlCount > rowIdx) {
           await dlInputs.nth(rowIdx).fill(d.cdl);
+        } else {
+          logger.warn(`createInsured: DL Number input not found for row ${i + 1} (found ${dlCount} inputs, need index ${rowIdx})`);
         }
       }
 
@@ -234,6 +251,11 @@ export async function createInsured(
           rowIdx
         );
       }
+
+      // Verify what was written to catch silent failures
+      const writtenFirst = await firstNames.nth(rowIdx).inputValue().catch(() => '');
+      const writtenLast = await lastNames.nth(rowIdx).inputValue().catch(() => '');
+      logger.info(`createInsured: driver ${i + 1} saved as "${writtenFirst} ${writtenLast}"`);
     }
 
     // ── CONTACTS ──────────────────────────────────────────────────────────────
@@ -283,6 +305,28 @@ export async function createInsured(
         await page.waitForTimeout(200);
       } else {
         logger.warn('Primary Email input not found');
+      }
+
+    }
+
+    // Secondary Email — campo independiente, solo se llena si el correo lo trae
+    if (cmd.secondaryEmail) {
+      const secondaryInput = page.locator('input[placeholder="Secondary Email"]').first();
+      if (await secondaryInput.count() > 0) {
+        await secondaryInput.click();
+        await page.waitForTimeout(200);
+        await secondaryInput.fill(cmd.secondaryEmail);
+        await page.waitForTimeout(500);
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(300);
+        await page.evaluate(() => {
+          const doc = (globalThis as any).document;
+          doc.querySelectorAll('.cdk-overlay-backdrop').forEach((el: any) => el.remove());
+          doc.querySelectorAll('.cdk-overlay-pane').forEach((el: any) => el.remove());
+        });
+        await page.waitForTimeout(200);
+      } else {
+        logger.warn('Secondary Email input not found');
       }
     }
 

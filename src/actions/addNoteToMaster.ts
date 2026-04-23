@@ -67,17 +67,23 @@ export async function addNoteToMaster(
       ? `${existing.replace(/\s+$/, '')}\n${cmd.note}`
       : cmd.note;
 
-    // Clear and type the note — use evaluate + fill to handle special chars like $ in iframes
-    await descField.evaluate((el: any, value: string) => {
-      el.value = value;
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-    }, next);
-    // Verify the value was set, if not retry with fill
+    // Type realistically: Clear with Ctrl+A+Delete, then type character-by-character.
+    // ASP.NET postback truncates when evaluate() sets el.value directly with special chars ($, commas).
+    await descField.click({ force: true });
+    await page.keyboard.press('Control+A');
+    await page.keyboard.press('Delete');
+    await page.waitForTimeout(100);
+    await descField.pressSequentially(next, { delay: 3 });
+    await page.waitForTimeout(200);
+    await descField.evaluate((el: any) => el.blur()).catch(() => {});
+    await page.waitForTimeout(200);
+
+    // Verify full value; if typed version was truncated, retry with fill() as fallback
     const written = await descField.inputValue().catch(() => '');
     if (written !== next) {
-      logger.warn('addNoteToMaster: evaluate did not set full value, retrying with fill...');
+      logger.warn(`addNoteToMaster: typed value mismatch (got ${written.length}/${next.length} chars), retrying with fill...`);
       await descField.fill(next);
+      await descField.evaluate((el: any) => el.blur()).catch(() => {});
     }
     const updateBtn = editContext.locator('#ctl00_ContentPlaceHolder1_btnUpdate_input').first();
     await updateBtn.scrollIntoViewIfNeeded().catch(() => {});

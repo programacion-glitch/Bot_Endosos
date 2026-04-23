@@ -19,7 +19,9 @@ import { screenshot } from '../browser/browserManager';
 function normalizeDateValue(value: string): string {
   const parts = value.split(/[^\d]/).filter(Boolean);
   if (parts.length !== 3) return value.trim();
-  return `${Number(parts[0])}/${Number(parts[1])}/${parts[2]}`;
+  const month = parts[0].padStart(2, '0');
+  const day = parts[1].padStart(2, '0');
+  return `${month}/${day}/${parts[2]}`;
 }
 
 function inferVehicleType(cmd: AddVehicleCommand): 'Truck' | 'Trailer' {
@@ -428,7 +430,18 @@ export async function addVehicle(
     await page.click('#ContentPlaceHolder1_FormView1_ctl01_ctl01___VIN_Number_lnkCheckVin');
     await page.waitForTimeout(3500);
 
-    const vinYear = await page.locator('#ctl00_ContentPlaceHolder1_FormView1_ctl01_ctl03___Year_ComboBox1_Input').inputValue();
+    // A veces la respuesta de Check VIN tarda más de lo esperado y el Year queda vacío.
+    // Reintentar hasta 3 veces antes de decidir si hay discrepancia o no.
+    let vinYear = '';
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      vinYear = await page
+        .locator('#ctl00_ContentPlaceHolder1_FormView1_ctl01_ctl03___Year_ComboBox1_Input')
+        .inputValue()
+        .catch(() => '');
+      if (vinYear) break;
+      logger.warn(`addVehicle: Year vacío tras Check VIN (intento ${attempt}/3), esperando...`);
+      await page.waitForTimeout(3000);
+    }
     const vinMake = await page.locator('#ContentPlaceHolder1_FormView1_ctl01_ctl02___Make_TextBox1').inputValue().catch(() => '');
     const vinModel = await page.locator('#ContentPlaceHolder1_FormView1_ctl01_ctl04___Model_TextBox1').inputValue().catch(() => '');
 

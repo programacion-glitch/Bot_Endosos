@@ -124,6 +124,57 @@ function field(block: string, key: string): string | undefined {
   return block.match(re)?.[1]?.trim();
 }
 
+/**
+ * Multi-line field capture — useful for notes that span multiple lines
+ * because Gmail/Outlook wrap long text.
+ *
+ * Stop rules (in order of priority):
+ *   1. Explicit end marker: `[FIN NOTA]` / `[END NOTE]` (case-insensitive, any position)
+ *   2. The next line matching a known field key (e.g. Holder, Name) — fallback
+ *   3. End of block
+ */
+function fieldMultiline(block: string, key: string, stopKeys: string[] = []): string | undefined {
+  const lines = block.split('\n');
+  const keyRe = new RegExp(`^\\s*${key}:\\s*(.*)$`, 'i');
+  const stopRe = stopKeys.length > 0
+    ? new RegExp(`^\\s*(?:${stopKeys.join('|')}):\\s*`, 'i')
+    : null;
+  const endMarkerRe = /\[\s*(?:FIN\s+NOTA|END\s+NOTE)\s*\]/i;
+
+  let capturing = false;
+  let captured: string[] = [];
+
+  for (const rawLine of lines) {
+    if (!capturing) {
+      const m = rawLine.match(keyRe);
+      if (m) {
+        capturing = true;
+        const firstContent = m[1];
+        // If the end marker is on the same line as "Note:", cut there
+        if (endMarkerRe.test(firstContent)) {
+          captured.push(firstContent.split(endMarkerRe)[0].trim());
+          break;
+        }
+        if (firstContent.trim()) captured.push(firstContent.trim());
+      }
+      continue;
+    }
+    // Priority 1: explicit end marker — cut at that line (including anything before the marker)
+    if (endMarkerRe.test(rawLine)) {
+      const before = rawLine.split(endMarkerRe)[0].trim();
+      if (before) captured.push(before);
+      break;
+    }
+    // Priority 2: stop at another known field (fallback)
+    if (stopRe && stopRe.test(rawLine)) break;
+    captured.push(rawLine.trim());
+  }
+
+  if (!capturing) return undefined;
+  const joined = captured.join(' ').replace(/\s+/g, ' ').trim();
+  return joined || undefined;
+}
+
 /** Converts `||` separators to newlines in note text. */
 function normalizeNote(value: string | undefined): string | undefined {
   if (!value) return value;
@@ -152,13 +203,79 @@ function parseDriverLine(line: string): Driver | null {
   };
 }
 
+/**
+ * Parses a Driver from a block that may have fields on separate lines
+ * (Gmail/Outlook line-wrap) or inline with `/` separators.
+ *
+ * Works for ADD_DRIVER (dobRequired=true) and REMOVE_DRIVER (dobRequired=false).
+ * Returns an empty driver shape if parsing fails so callers can still fall back.
+ */
+function parseDriverFromBlock(block: string, _firstLine: string, dobRequired: boolean): Driver {
+  // Search both in single-line format (fields separated by `/`) and in multi-line
+  // format (each field on its own line, possibly with blank lines between).
+  // We search the WHOLE block so it doesn't matter where the fields are.
+
+  // `[^/\n]+` lets inline-with-slashes format work; fallback to full-line match.
+  const nameInline = block.match(/Name:\s*([^/\n]+?)\s*(?:\/|$)/im);
+  const nameBlock = block.match(/^\s*Name:\s*(.+)$/im);
+
+  const lastInline = block.match(/Last\s*Name:\s*([^/\n]+?)\s*(?:\/|$)/im);
+  const lastBlock = block.match(/^\s*Last\s*Name:\s*(.+)$/im);
+
+  // CDL regex tries 3 formats in order:
+  //   1. `CDL: 01296035 (TX)`        — ID + state in parens
+  //   2. `CDL: 01296035 TX`          — ID + state separated by space
+  //   3. `CDL: 01296035`             — ID only, no state (state optional)
+  const cdlM =
+    block.match(/CDL:\s*([\w]+)\s*\((\w{2})\)/i) ??
+    block.match(/CDL:\s*([\w]+)\s+([A-Z]{2})\b/i) ??
+    block.match(/CDL:\s*([\w]+)/i);
+
+  const dobM = block.match(/DOB:?\s*([\d/]+)/i);
+
+  const firstName = (nameInline?.[1] ?? nameBlock?.[1] ?? '').trim();
+  const lastName = (lastInline?.[1] ?? lastBlock?.[1] ?? '').trim();
+  const cdl = cdlM?.[1]?.trim() ?? '';
+  const cdlState = cdlM?.[2]?.trim() ?? '';
+  const dob = dobM?.[1]?.trim() ?? '';
+
+  const hasRequired = firstName && lastName && cdl && (dobRequired ? !!dob : true);
+
+  if (!hasRequired) {
+    return { firstName: '', lastName: '', cdl: '', cdlState: '', dob: '' };
+  }
+
+  return { firstName, lastName, cdl, cdlState, dob };
+}
+
 function parseDrivers(block: string): Driver[] {
   const drivers: Driver[] = [];
-  const lines = block.split('\n');
-  for (const line of lines) {
-    if (/Driver\d*:/i.test(line)) {
-      const d = parseDriverLine(line);
-      if (d) drivers.push(d);
+  const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
+
+  for (let i = 0; i < lines.length; i++) {
+    if (!/Driver\d*:/i.test(lines[i])) continue;
+
+    // First try: single-line driver (Gmail/Outlook didn't wrap)
+    let d = parseDriverLine(lines[i]);
+    if (d) {
+      drivers.push(d);
+      continue;
+    }
+
+    // Fallback: Gmail/Outlook may have wrapped the line. Join this line with the next
+    // lines (up to 6) into a single virtual line and try again.
+    let joined = lines[i];
+    for (let j = i + 1; j < Math.min(lines.length, i + 7); j++) {
+      // Stop if we hit another driver entry or an empty separator
+      if (/^(Driver\d*:|xx)/i.test(lines[j])) break;
+      joined += ' ' + lines[j];
+      const tryParse = parseDriverLine(joined);
+      if (tryParse) {
+        drivers.push(tryParse);
+        // Skip the consumed lines
+        i = j;
+        break;
+      }
     }
   }
   return drivers;
@@ -168,7 +285,7 @@ function parseHolder(block: string): HolderInfo {
   return {
     name: field(block, "Holder[’']?s? ?name") ?? field(block, 'Holder name') ?? '',
     address: field(block, "Holder[’']?s? ?[Aa]ddress") ?? '',
-    note: normalizeNote(field(block, 'Note')),
+    note: normalizeNote(fieldMultiline(block, 'Note', ['Holder', "Holder['’]s?\\s*name", "Holder['’]s?\\s*address"])),
   };
 }
 
@@ -194,6 +311,7 @@ function parseBlock(block: string): Command | null {
       drivers: parseDrivers(block),
       phone: field(block, 'Phone') ?? '',
       email: field(block, 'Email') ?? '',
+      secondaryEmail: field(block, 'Secondary Email') ?? undefined,
     };
   }
 
@@ -231,7 +349,9 @@ function parseBlock(block: string): Command | null {
   }
 
   // ── Remove Vehicle/Trailer ────────────────────────────────────────────────
-  if (/^(?:Remove|Delete)\s+(?:Vehicle\/Trailer|Vehicle|Trailer)\b(?!\s*\/(?:Driver|Holder))/i.test(firstLine)) {
+  // Excluye "Delete Vehicle's value" / "Update Vehicle's value" para que caigan
+  // en los handlers DELETE_VEHICLE_VALUE / UPDATE_VEHICLE_VALUE.
+  if (/^(?:Remove|Delete)\s+(?:Vehicle\/Trailer|Vehicle|Trailer)\b(?!\s*\/(?:Driver|Holder))(?!'?s?\s+value)/i.test(firstLine)) {
     const vinM = firstLine.match(/VIN#:?\s*([\w]+)/i) ?? block.match(/VIN#:?\s*([\w]+)/i);
     const yearM = firstLine.match(/Year:?\s+(\d{1,2},?\d{3}|\d{4})/i) ?? block.match(/Year:?\s+(\d{1,2},?\d{3}|\d{4})/i);
     const descM = firstLine.match(/Description:?\s+([^/\n]+)/i) ?? block.match(/Description:?\s+([^/\n]+)/i);
@@ -251,45 +371,20 @@ function parseBlock(block: string): Command | null {
 
   // ── Add Driver ────────────────────────────────────────────────────────────
   if (/^Add\s+Driver/i.test(firstLine)) {
-    // Try single-line format first, then multi-line field extraction
-    let d = parseDriverLine(firstLine);
-    if (!d) {
-      const cdlM =
-        block.match(/CDL:\s*([\w]+)\s*\((\w{2})\)/i) ??
-        block.match(/CDL:\s*([\w]+)\s+([A-Z]{2})\b/i);
-      const firstName = field(block, 'Name');
-      const lastName = field(block, 'Last\\s*Name');
-      const dob = field(block, 'DOB');
-      if (firstName && lastName && cdlM && dob) {
-        d = { firstName, lastName, cdl: cdlM[1].trim(), cdlState: cdlM[2].trim(), dob };
-      }
-    }
     return {
       type: 'ADD_DRIVER',
       rawText: block,
-      driver: d ?? { firstName: '', lastName: '', cdl: '', cdlState: '', dob: '' },
+      driver: parseDriverFromBlock(block, firstLine, /* dobRequired */ true),
     };
   }
 
   // ── Remove Driver ─────────────────────────────────────────────────────────
+  // DOB is optional for Remove Driver — matching by Name/LastName/CDL is enough.
   if (/^(?:Remove|Delete)\s+Driver/i.test(firstLine)) {
-    // Try single-line format first, then multi-line field extraction
-    let d = parseDriverLine(firstLine);
-    if (!d) {
-      const cdlM =
-        block.match(/CDL:\s*([\w]+)\s*\((\w{2})\)/i) ??
-        block.match(/CDL:\s*([\w]+)\s+([A-Z]{2})\b/i);
-      const firstName = field(block, 'Name');
-      const lastName = field(block, 'Last\\s*Name');
-      const dob = field(block, 'DOB');
-      if (firstName && lastName && cdlM && dob) {
-        d = { firstName, lastName, cdl: cdlM[1].trim(), cdlState: cdlM[2].trim(), dob };
-      }
-    }
     return {
       type: 'REMOVE_DRIVER',
       rawText: block,
-      driver: d ?? { firstName: '', lastName: '', cdl: '', cdlState: '', dob: '' },
+      driver: parseDriverFromBlock(block, firstLine, /* dobRequired */ false),
     };
   }
 
@@ -350,7 +445,7 @@ function parseBlock(block: string): Command | null {
     return {
       type: 'ADD_NOTE_TO_MASTER',
       rawText: block,
-      note: normalizeNote(field(block, 'Note')) ?? '',
+      note: normalizeNote(fieldMultiline(block, 'Note')) ?? '',
     };
   }
 
@@ -374,7 +469,7 @@ function parseBlock(block: string): Command | null {
       vin: vinM?.[1]?.trim() ?? '',
       holderName: field(block, "Holder'?s? ?name") ?? field(block, 'Holder name') ?? '',
       updateTo: field(block, 'Update to') ?? '',
-      note: normalizeNote(field(block, 'Note')),
+      note: normalizeNote(fieldMultiline(block, 'Note')),
     };
   }
 
@@ -385,7 +480,7 @@ function parseBlock(block: string): Command | null {
       rawText: block,
       holderName: field(block, "Holder'?s? ?name") ?? field(block, 'Holder name') ?? '',
       updateTo: field(block, 'Update to') ?? '',
-      note: normalizeNote(field(block, 'Note')),
+      note: normalizeNote(fieldMultiline(block, 'Note')),
     };
   }
 
@@ -508,6 +603,13 @@ export function parseEmail(raw: RawEmail): ParsedEmail {
   let commandBody = raw.body.replace(/\*{3,}[\s\S]*$/, '');
   commandBody = commandBody.replace(/[-=_*]*\s*NOTAS?\s+ADICIONALES?[\s\S]*$/i, '');
   commandBody = commandBody.replace(/[-=_*]*\s*ADDITIONAL\s+NOTES?[\s\S]*$/i, '');
+  // Cut the H2O signature block — anything from "We Value The Relationship" onward is
+  // the automatic signature and must never be treated as part of a command.
+  commandBody = commandBody.replace(/We\s+Value\s+The\s+Relationship[\s\S]*$/i, '');
+  // Also cut common signature markers (H2O Commercial Insurance Agency block)
+  commandBody = commandBody.replace(/H2[0O]\s+Commercial\s+Insurance\s+Agency[\s\S]*$/i, '');
+  // Cut at standard email signature separators ("-- " on its own line)
+  commandBody = commandBody.replace(/\n--\s*\n[\s\S]*$/, '');
   commandBody = commandBody.trim();
   const blocks = splitCommandBlocks(commandBody);
   const commands: Command[] = [];

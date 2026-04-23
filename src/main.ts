@@ -72,7 +72,36 @@ async function processEmail(raw: RawEmail): Promise<void> {
 
   logEmailProcessing(email.subject, email.commands.length);
 
-  let page = await getNowCertsPage();
+  // Open the browser and log in to NowCerts (with retry if it fails mid-startup).
+  // Each email gets a fresh browser/session so nothing stays open between emails.
+  let page;
+  try {
+    page = await getNowCertsPage();
+  } catch (err) {
+    const msg = (err as Error).message;
+    logger.error(`Failed to open NowCerts browser for email "${email.subject}": ${msg}`);
+    // Force-reset state and retry once
+    invalidateSession();
+    try {
+      await closeBrowser();
+    } catch {
+      // ignore
+    }
+    try {
+      page = await getNowCertsPage();
+    } catch (err2) {
+      const msg2 = (err2 as Error).message;
+      logger.error(`Second browser-open attempt also failed: ${msg2}`);
+      await sendErrorNotification({
+        emailSubject: email.subject,
+        errorMessage: `Could not open NowCerts browser after 2 attempts.\n\nFirst error: ${msg}\nSecond error: ${msg2}`,
+        clientName: email.clientName,
+        usdot: email.usdot,
+      });
+      await markAsSeen(raw.uid);
+      return;
+    }
+  }
 
   // Navigate to client profile (if it's not a Create Insured command)
   const isCreateInsured = email.commands.some(c => c.type === 'CREATE_INSURED');
@@ -190,22 +219,24 @@ async function main(): Promise<void> {
     logger.warn(`Could not verify mailbox "${PROCESSED_FOLDER}": ${(err as Error).message}`);
   }
 
-  // Pre-warm browser + login
-  try {
-    await getNowCertsPage();
-    logger.info('NowCerts session established.');
-  } catch (err) {
-    logger.error(`Failed to log in to NowCerts on startup: ${(err as Error).message}`);
-    logger.warn('Will retry on first email...');
-  }
+  logger.info('Bot ready. Browser will launch on-demand when an email arrives.');
 
-  // Start IMAP polling loop
+  // Start IMAP polling loop — browser is only launched when an email arrives.
   await startPolling(async (emails: RawEmail[]) => {
     for (const email of emails) {
       try {
         await processEmail(email);
       } catch (err) {
         logger.error(`Unhandled error processing email "${email.subject}": ${(err as Error).message}`);
+      } finally {
+        // Close the browser after processing each email so we don't keep idle sessions open.
+        try {
+          await closeBrowser();
+          invalidateSession();
+          logger.info('Browser closed after email processing.');
+        } catch (err) {
+          logger.warn(`Could not close browser cleanly: ${(err as Error).message}`);
+        }
       }
     }
   });

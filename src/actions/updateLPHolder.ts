@@ -2,7 +2,7 @@ import { Page } from 'playwright';
 import { UpdateLPHolderCommand, ActionResult } from '../types';
 import { logger } from '../utils/logger';
 import { ok, fail, waitForSaveConfirmation, todayYYYYMMdd, safeFilenamePart, escapeRegex, getInsuredUrl } from './_base';
-import { downloadCertificate } from './_holderHelpers';
+import { downloadCertificate, writeDescriptionOfOperations } from './_holderHelpers';
 
 /**
  * UPDATE LP HOLDER NAME/ADDRESS FOR VIN#
@@ -58,12 +58,13 @@ export async function updateLPHolder(
       await nameField.fill(cmd.updateTo);
     }
 
-    // Add notes if any
+    // Add notes if any — use the robust writer (handles $ and commas without truncation)
     if (cmd.note) {
       const descField = page.locator('textarea[placeholder="Description of Operations"]').first();
       if (await descField.count() > 0) {
-        await descField.fill(cmd.note);
+        await writeDescriptionOfOperations(page, cmd.note);
       } else {
+        // Legacy fallback
         await page.locator('textarea[name="DescriptionOfOperations"], #descOfOps').first().fill(cmd.note);
       }
     }

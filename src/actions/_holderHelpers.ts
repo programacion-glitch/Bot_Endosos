@@ -165,14 +165,28 @@ export async function downloadCertificate(
   holderName?: string,
   description?: string
 ): Promise<string[]> {
+  // Esperar a que la grilla refleje el holder recién guardado antes de abrir Actions.
+  // La fila puede tardar unos segundos en aparecer después del Save aunque
+  // waitForSaveConfirmation ya haya retornado.
+  if (holderName) {
+    const holderRow = page.locator('tr').filter({ hasText: new RegExp(escapeRegex(holderName), 'i') }).first();
+    await holderRow.waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {
+      logger.warn(`downloadCertificate: holder row "${holderName}" not visible within 15s, continuing...`);
+    });
+    await page.waitForTimeout(1000);
+  }
+
   const row = holderName
     ? page.locator('tr').filter({ hasText: new RegExp(escapeRegex(holderName), 'i') }).first()
     : page.locator('tr').first();
 
   const actions = row.locator('button,span,a').filter({ hasText: /Actions/i }).first();
   await actions.click({ force: true });
-  await page.waitForTimeout(700);
+  await page.waitForTimeout(1000);
   await page.locator('li, a, span').filter({ hasText: /^Send Certificate$/i }).first().click({ force: true });
+
+  // Esperar a que el modal de Send Certificate esté completamente cargado (no sólo un timeout fijo).
+  await page.waitForSelector('#ctl00_ContentPlaceHolder1_btnPreviewCertificate_input', { state: 'visible', timeout: 20_000 }).catch(() => {});
   await page.waitForTimeout(2500);
 
   await checkAllCombo(page, 'ctl00_ContentPlaceHolder1_usrVehicles_ddlVehicles_Arrow', 'ctl00_ContentPlaceHolder1_usrVehicles_ddlVehicles_DropDown');
@@ -187,6 +201,18 @@ export async function downloadCertificate(
   }
 
   await page.locator('#ctl00_ContentPlaceHolder1_btnPreviewCertificate_input').click({ force: true });
+  // Esperar a que el iframe del preview tenga un src válido — el servidor tarda
+  // varios segundos en generar el PDF y si se lee antes, el cert sale vacío.
+  await page.waitForFunction(
+    () => {
+      const doc = (globalThis as any).document;
+      const iframe = doc?.querySelector('iframe[name="rwPreviewCertificate"]') as any;
+      const src = iframe?.getAttribute?.('src') ?? '';
+      return src && src.length > 10;
+    },
+    null,
+    { timeout: 20_000 }
+  ).catch(() => {});
   await page.waitForTimeout(5000);
 
   const filePath = await buildPreviewPdf(page, filename);
@@ -219,7 +245,20 @@ async function buildPreviewPdf(page: Page, filename: string): Promise<string> {
   const context = page.context();
   const previewPage = await context.newPage();
   await previewPage.goto(previewSrc, { waitUntil: 'domcontentloaded' });
-  await previewPage.waitForTimeout(4000);
+
+  // Esperar hasta que el visor RadPdf tenga un src con document key — el
+  // servidor puede tardar varios segundos en generar el PDF.
+  await previewPage.waitForFunction(
+    () => {
+      const doc = (globalThis as any).document;
+      const el = doc?.querySelector('#ContentPlaceHolder1_PdfWebControl1') as any;
+      const src = el?.getAttribute?.('src') ?? '';
+      return /[?&]dk=/.test(src);
+    },
+    null,
+    { timeout: 30_000 }
+  ).catch(() => {});
+  await previewPage.waitForTimeout(3000);
 
   const innerSrc = await previewPage.locator('#ContentPlaceHolder1_PdfWebControl1').getAttribute('src');
   if (!innerSrc) {
@@ -234,9 +273,17 @@ async function buildPreviewPdf(page: Page, filename: string): Promise<string> {
     throw new Error('RadPdf document key not found');
   }
 
+  // Esperar a que el servidor reporte pageCount > 0 — si se lee antes el cert
+  // sale vacío aunque el holder esté bien guardado.
   const payload = await previewPage.evaluate(async (documentKey: string) => {
-    const xml = await fetch(`/Pages/Certificates/RadPdf.axd?rt=6&dk=${documentKey}&r=1`).then(r => r.text());
-    const pageCount = Number((xml.match(/<pagecount>(\d+)<\/pagecount>/)?.[1]) || '1');
+    const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
+    let pageCount = 0;
+    for (let attempt = 0; attempt < 6 && pageCount === 0; attempt++) {
+      if (attempt > 0) await sleep(1500);
+      const xml = await fetch(`/Pages/Certificates/RadPdf.axd?rt=6&dk=${documentKey}&r=1`).then(r => r.text());
+      pageCount = Number((xml.match(/<pagecount>(\d+)<\/pagecount>/)?.[1]) || '0');
+    }
+    if (pageCount === 0) pageCount = 1;
     const pages: number[][] = [];
 
     for (let i = 1; i <= pageCount; i++) {
