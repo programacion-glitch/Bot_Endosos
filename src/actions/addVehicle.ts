@@ -232,22 +232,20 @@ async function openIdCardTemplate(page: Page): Promise<void> {
 }
 
 async function openFormData(page: Page): Promise<void> {
-  // NowCerts updated the PDF editor (April 2026): the old "Form Data" drawer button
-  // was replaced by an inline toggle (.pdf-editor-header-toggle) that expands/collapses
-  // a header panel containing the Form Name input and Policies/Vehicles dropdowns.
-  const formNameInput = page.locator('#dataSource_formName');
+  // NowCerts re-organized the PDF editor (May 2026): the form-data row is now visible
+  // by default, and the visible Form Name input changed from #dataSource_formName
+  // (now hidden inside ant-form-item-hidden) to input[placeholder="Form Name"] in
+  // .pdf-editor-toolbar-row. Both inputs share React state.
+  // The header toggle still exists and now collapses BOTH rows (toolbar + form-data).
+  const formNameInput = page.locator('input[placeholder="Form Name"]').first();
 
-  // First check if the panel is already expanded
   const alreadyVisible = await formNameInput.isVisible().catch(() => false);
   if (alreadyVisible) return;
 
-  // New UI: toggle the collapsed header panel
   const headerToggle = page.locator('.pdf-editor-header-toggle').first();
-  // Legacy UI fallback: old "Form Data" button
   const legacyFormDataButton = page.locator('button[title="Toggle Form Data Panel"], button').filter({ hasText: /^Form Data$/i }).first();
 
   for (let attempt = 0; attempt < 3; attempt++) {
-    // Try the new toggle first
     if (await headerToggle.count() > 0) {
       const isCollapsed = await headerToggle.evaluate(
         (el: any) => el.classList.contains('pdf-editor-header-toggle--collapsed')
@@ -258,7 +256,6 @@ async function openFormData(page: Page): Promise<void> {
         });
       }
     } else if (await legacyFormDataButton.count() > 0) {
-      // Fallback: legacy "Form Data" drawer button
       await legacyFormDataButton.click({ force: true }).catch(async () => {
         await legacyFormDataButton.evaluate((el: any) => el.click());
       });
@@ -267,7 +264,7 @@ async function openFormData(page: Page): Promise<void> {
     const visible = await formNameInput.waitFor({ state: 'visible', timeout: 7_000 }).then(() => true).catch(() => false);
     if (visible) return;
 
-    logger.info(`openFormData: header panel not visible after toggle (attempt ${attempt + 1}/3), retrying...`);
+    logger.info(`openFormData: form-name input not visible after toggle (attempt ${attempt + 1}/3), retrying...`);
     await page.waitForTimeout(1000);
   }
 
@@ -549,7 +546,9 @@ async function attemptCreateIDCard(
   await selectAntOption(page, 1, new RegExp(escapeRegex(vin), 'i'));
 
   // Now overwrite the form name with our target (e.g. "ID CARD VIN# 0022")
-  const formNameInput = page.locator('#dataSource_formName');
+  // The visible input is in the toolbar row (placeholder "Form Name"); React syncs it
+  // back to the hidden #dataSource_formName.
+  const formNameInput = page.locator('input[placeholder="Form Name"]').first();
   await formNameInput.click({ force: true }).catch(() => {});
   await page.keyboard.press('Control+A');
   await page.keyboard.press('Delete');
