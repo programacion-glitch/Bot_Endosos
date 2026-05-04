@@ -214,9 +214,19 @@ async function fillWorkersComp(page: Page, cmd: AddPolicyCommand): Promise<void>
 }
 
 async function fillExcessLiability(page: Page, cmd: AddPolicyCommand): Promise<void> {
-  await setCheckboxById(page, byIdEndsWith('excessUmbrellaLiability_cbExcessUmbrellaLiability'), true);
-  await fillCoverageText(page, byIdEndsWith('excessUmbrellaLiability_txtEachOccurrence'), cmd.eachOccurrence);
-  await fillCoverageText(page, byIdEndsWith('excessUmbrellaLiability_txtAgregate'), cmd.aggregate);
+  // IDs reales validados live 2026-05-04. La sección "Excess/Umbrella Liability" tiene:
+  //   - cbExcessLiab     → checkbox "Excess Liability" (el principal cuando policyType=EXL)
+  //   - cbUmbrellaLiab   → checkbox "Umbrella Liability" (alternativo)
+  //   - cbOccurLiab      → checkbox "Occurrence" (modo de cobertura, default)
+  //   - cbClaimsMadeLiab → checkbox "Claims Made"
+  //   - txtEachOccurrenceUmbrellaLiability → campo Limit / Each Occurrence
+  //   - txtAggregate                       → campo Aggregate
+  //
+  // El correo trae "Limit:" (no "Each Occurrence:"); usamos cmd.limit como fallback.
+  await setCheckboxById(page, byIdEndsWith('excessUmbrellaLiability_cbExcessLiab'), true);
+  await setCheckboxById(page, byIdEndsWith('excessUmbrellaLiability_cbOccurLiab'), true);
+  await fillCoverageText(page, byIdEndsWith('excessUmbrellaLiability_txtEachOccurrenceUmbrellaLiability'), cmd.eachOccurrence ?? cmd.limit);
+  await fillCoverageText(page, byIdEndsWith('excessUmbrellaLiability_txtAggregate'), cmd.aggregate);
 }
 
 /**

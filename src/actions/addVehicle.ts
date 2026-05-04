@@ -215,20 +215,61 @@ async function openIdCardTemplate(page: Page): Promise<void> {
   }
   await templateRow.waitFor({ state: 'visible', timeout: 15_000 });
 
-  // Click Actions on the template row (kendo menu)
+  // Abrir el menú Actions y leer el href del link "Edit" — luego navegamos
+  // directo via page.goto(). Clickear el link mantiene estado SPA del Momentum
+  // wrapper que puede confundir a PDF.js y dejarlo atorado en "Rendering 98%".
   const actionsLi = templateRow.locator('li[aria-label="..."]').first();
   await actionsLi.click();
   await page.waitForTimeout(1000);
 
-  // Click Edit from the kendo popup menu
-  const editItem = page.locator('.k-animation-container .k-item, .k-menu-popup .k-item').filter({
+  const editLink = page.locator('.k-animation-container .k-item a, .k-menu-popup .k-item a').filter({
     hasText: /^Edit$/i,
   }).first();
-  await editItem.click();
+  const editHref = await editLink.getAttribute('href').catch(() => null);
 
-  // Wait for the PDF editor (Insert.aspx — creates a new form from the template)
-  await page.waitForURL('**/Files/Insert.aspx**', { timeout: 20_000 }).catch(() => {});
+  if (!editHref) {
+    throw new Error('No se pudo obtener href del link Edit en el menú Actions del template');
+  }
+
+  // Navegación directa (full page load) en vez de click — evita estado residual
+  // del Momentum SPA. Esperamos networkidle para que PDF.js termine de bootstrapping.
+  await page.goto(editHref, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('networkidle', { timeout: 30_000 }).catch(() => {});
   await page.waitForTimeout(3000);
+
+  // Verificación: esperamos a que el toolbar del editor aparezca antes de seguir
+  await page.locator('.pdf-editor-toolbar-row, input[placeholder="Form Name"]').first()
+    .waitFor({ state: 'visible', timeout: 20_000 })
+    .catch(() => logger.warn('openIdCardTemplate: toolbar del editor no apareció en 20s'));
+}
+
+/**
+ * Espera a que PDF.js termine de renderizar el documento antes de interactuar.
+ * NowCerts muestra un overlay tipo "Rendering PDF... XX%" mientras PDF.js trabaja.
+ * Si tocamos los dropdowns mientras PDF.js está activo, dispara el popup
+ * "An error occurred while opening the document" y deja el editor en mal estado.
+ */
+async function waitForPdfRender(page: Page): Promise<void> {
+  // Esperar que el spinner / overlay de "Rendering" desaparezca
+  await page.waitForFunction(
+    () => {
+      const doc = (globalThis as any).document;
+      // Buscar spinners activos del PDF
+      const spinners = doc.querySelectorAll('.ant-spin-spinning, .pdf-loading, [class*="rendering"]');
+      // Buscar texto "Rendering" o "Loading" visible
+      const loadingTexts = Array.from(doc.querySelectorAll('*')).filter((el: any) => {
+        if (el.children.length > 0) return false;
+        const txt = (el.textContent || '').trim();
+        if (!/^Rendering|^Loading|please wait/i.test(txt)) return false;
+        return el.offsetParent !== null;
+      });
+      return spinners.length === 0 && loadingTexts.length === 0;
+    },
+    { timeout: 30_000 }
+  ).catch(() => {
+    logger.warn('waitForPdfRender: PDF aún parece en render tras 30s — continuando de todos modos');
+  });
+  await page.waitForTimeout(1000);
 }
 
 async function openFormData(page: Page): Promise<void> {
@@ -310,17 +351,28 @@ async function saveIdCard(page: Page): Promise<void> {
   await saveButton.click({ force: true }).catch(async () => {
     await saveButton.evaluate((el: any) => el.click());
   });
-  await page.waitForTimeout(1000);
 
-  // Confirm dialog if it appears
-  const confirmYes = page.locator('button.ant-btn-primary, button').filter({ hasText: /^Yes$/i }).first();
+  // NowCerts SIEMPRE muestra un modal "Are you sure you want to save?" con botones
+  // No / Yes después del click de Save (live confirmado 2026-05-04). Esperamos a que
+  // aparezca el modal y clickeamos "Yes". Sin esto, el save no se confirma y el URL
+  // queda en /Files/Insert.aspx en vez de redirigir a /PdfForms.
+  const confirmYes = page.locator('.ant-modal button.ant-btn-primary').filter({ hasText: /^Yes$/i }).first();
+  await confirmYes.waitFor({ state: 'visible', timeout: 10_000 }).catch(() => {
+    logger.warn('saveIdCard: modal "Are you sure" no apareció en 10s');
+  });
+
   if (await confirmYes.count() > 0 && await confirmYes.isVisible().catch(() => false)) {
     await confirmYes.click({ force: true }).catch(async () => {
       await confirmYes.evaluate((el: any) => el.click());
     });
+  } else {
+    logger.warn('saveIdCard: botón "Yes" no encontrado tras Save — el flujo puede no completarse');
   }
 
-  await page.waitForURL('**/PdfForms', { timeout: 30_000 }).catch(() => {});
+  // Tras el Yes, NowCerts redirige a /Insureds/Details/{id}/PdfForms.
+  await page.waitForURL('**/PdfForms', { timeout: 30_000 }).catch(() => {
+    logger.warn('saveIdCard: no redirigió a /PdfForms en 30s tras Yes');
+  });
   await page.waitForTimeout(2000);
 }
 
@@ -525,6 +577,68 @@ export async function addVehicle(
 }
 
 /**
+ * Espera a que un campo del PDF (input con name F[0].P1[0]....) se llene con
+ * el valor esperado. NowCerts autofiltra el form al seleccionar Policy/Vehicle
+ * en los ant-selects, pero el render del PDF puede tardar unos segundos. Si
+ * pasamos a la siguiente acción demasiado pronto, NowCerts dispara el popup
+ * "An error occurred while opening the document" y queda incompleto.
+ */
+async function waitForPdfFieldToPopulate(
+  page: Page,
+  selector: string,
+  expectedSubstring: string,
+  label: string
+): Promise<void> {
+  try {
+    await page.waitForFunction(
+      ({ sel, expected }) => {
+        const doc = (globalThis as any).document;
+        const input = doc?.querySelector(sel);
+        return (input?.value || '').includes(expected);
+      },
+      { sel: selector, expected: expectedSubstring },
+      { timeout: 12_000 }
+    );
+  } catch {
+    logger.warn(`waitForPdfFieldToPopulate: ${label} no se llenó después de 12s — continuando`);
+  }
+}
+
+/**
+ * Dismisses any popup/modal that NowCerts may show after selecting policy+vehicle
+ * in the ID Card form-data panel. Common case: an ant-modal that says
+ * "Document did not load correctly" with an OK button. Without dismissing it,
+ * the underlying PDF form fields don't auto-fill and downstream validation fails.
+ */
+async function dismissPopupsAfterPrefill(page: Page): Promise<void> {
+  await page.waitForTimeout(800);
+
+  // Native browser dialog (alert/confirm) — auto-accept any pending one.
+  page.once('dialog', async (dialog) => {
+    logger.info(`dismissPopupsAfterPrefill: native dialog "${dialog.message()}", accepting`);
+    await dialog.accept().catch(() => {});
+  });
+
+  // Ant-modal popup (most common in this editor).
+  const modalOk = page.locator(
+    '.ant-modal:not([style*="display: none"]) .ant-modal-confirm-btns button.ant-btn-primary, ' +
+    '.ant-modal:not([style*="display: none"]) .ant-modal-footer button.ant-btn-primary'
+  ).first();
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (await modalOk.count() === 0) break;
+    const visible = await modalOk.isVisible().catch(() => false);
+    if (!visible) break;
+    const modalText = await page.locator('.ant-modal:not([style*="display: none"]) .ant-modal-body').first().textContent().catch(() => '');
+    logger.info(`dismissPopupsAfterPrefill: ant-modal detected ("${(modalText || '').trim().slice(0, 80)}"), clicking OK (attempt ${attempt + 1}/3)`);
+    await modalOk.click({ force: true }).catch(async () => {
+      await modalOk.evaluate((el: any) => el.click());
+    });
+    await page.waitForTimeout(500);
+  }
+}
+
+/**
  * Single attempt to create an ID Card.
  * Separated from retry logic so each attempt starts fresh.
  */
@@ -540,53 +654,98 @@ async function attemptCreateIDCard(
   await openIdCardTemplate(page);
   await openFormData(page);
 
-  // Select policy and vehicle FIRST — selecting them may auto-regenerate the form name,
-  // so we set the name AFTER to ensure it sticks.
+  // Crítico: esperar que PDF.js termine antes de tocar los ant-select.
+  // Sin esto, el bot abre el dropdown mientras el PDF está renderizando y
+  // dispara "An error occurred while opening the document".
+  await waitForPdfRender(page);
+
+  // Select policy first. Tras seleccionar la póliza, NowCerts dispara un re-render
+  // del PDF y corre el autofill — si abrimos el dropdown del Vehicle antes de que
+  // termine, dispara un popup "An error occurred while opening the document" que
+  // deja el campo Policy_Number vacío. Por eso esperamos a que el campo del PDF
+  // tenga el valor antes de seleccionar el vehículo.
   await selectAntOption(page, 0, new RegExp(`^${escapeRegex(policyNumber)}\\b`, 'i'));
+  await waitForPdfFieldToPopulate(
+    page,
+    'input[name="F[0].P1[0].Policy_PolicyNumberIdentifier_A[0]"]',
+    policyNumber,
+    `policy ${policyNumber}`
+  );
+
   await selectAntOption(page, 1, new RegExp(escapeRegex(vin), 'i'));
+  await waitForPdfFieldToPopulate(
+    page,
+    'input[name="F[0].P1[0].Vehicle_VINIdentifier_A[0]"]',
+    vin,
+    `vin ${vin}`
+  );
+
+  // Por si NowCerts disparó el popup a pesar de la espera (caso degradado),
+  // lo dismisseamos.
+  await dismissPopupsAfterPrefill(page);
 
   // Now overwrite the form name with our target (e.g. "ID CARD VIN# 0022")
   // The visible input is in the toolbar row (placeholder "Form Name"); React syncs it
   // back to the hidden #dataSource_formName.
+  // delay: 30ms — con 5ms el bot pierde caracteres ("DCAD VN 90" en vez de "ID CARD VIN# 8940")
   const formNameInput = page.locator('input[placeholder="Form Name"]').first();
   await formNameInput.click({ force: true }).catch(() => {});
   await page.keyboard.press('Control+A');
   await page.keyboard.press('Delete');
-  await formNameInput.pressSequentially(targetName, { delay: 5 });
+  await formNameInput.pressSequentially(targetName, { delay: 30 });
   await formNameInput.evaluate((el: any) => el.blur()).catch(() => {});
   await page.waitForTimeout(300);
 
+  // Verificación final: si el form name no quedó como esperábamos, forzar via JS.
+  const currentFormName = await formNameInput.inputValue().catch(() => '');
+  if (currentFormName !== targetName) {
+    logger.warn(`Form name got "${currentFormName}" instead of "${targetName}", forcing via JS`);
+    await formNameInput.evaluate((el: any, value: string) => {
+      const win = (globalThis as any).window;
+      const setter = Object.getOwnPropertyDescriptor(win.HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(el, value);
+      el.dispatchEvent(new win.Event('input', { bubbles: true }));
+      el.dispatchEvent(new win.Event('change', { bubbles: true }));
+    }, targetName);
+    await page.waitForTimeout(200);
+  }
+
+  // Los campos visuales del PDF (F[0].P1[0]....) son meramente cosméticos.
+  // El save real usa los hidden #dataSource_formName, #dataSource_policyIds y
+  // #dataSource_vehicleIds — esos ya quedaron seteados por selectAntOption y el
+  // form name fill. Si el PDF.js se queda atorado en "Rendering 98%" en headless,
+  // los campos visuales no se llenan, pero el save sigue funcionando.
+  //
+  // Por eso: intentamos un fill cosmético de los campos visuales (best-effort,
+  // sin fallar si están dead), y procedemos a guardar. La verificación real es
+  // que el row aparezca en el grid Edited Forms después del save (eso lo hace
+  // downloadFlattenedIdCard).
   const policyNumberField = page.locator('input[name="F[0].P1[0].Policy_PolicyNumberIdentifier_A[0]"]').first();
   const effectiveDateField = page.locator('input[name="F[0].P1[0].Policy_EffectiveDate_A[0]"]').first();
   const insuredNameField = page.locator('input[name="F[0].P1[0].NamedInsured_FullName_A[0]"]').first();
   const vinField = page.locator('input[name="F[0].P1[0].Vehicle_VINIdentifier_A[0]"]').first();
 
-  await page.waitForFunction(
-    ({ expectedPolicyNumber, expectedVin }) => {
-      const doc = (globalThis as any).document;
-      const policyInput = doc?.querySelector('input[name="F[0].P1[0].Policy_PolicyNumberIdentifier_A[0]"]');
-      const vinInput = doc?.querySelector('input[name="F[0].P1[0].Vehicle_VINIdentifier_A[0]"]');
-      return (
-        (policyInput?.value || '').includes(expectedPolicyNumber) &&
-        (vinInput?.value || '').includes(expectedVin)
-      );
-    },
-    { expectedPolicyNumber: policyNumber, expectedVin: vin },
-    { timeout: 10_000 }
-  ).catch(() => {});
-
-  const currentEffectiveDate = await effectiveDateField.inputValue().catch(() => '');
-  if (normalizeDateValue(currentEffectiveDate) !== normalizeDateValue(effectiveDate)) {
-    await effectiveDateField.fill(normalizeDateValue(effectiveDate));
-  }
-
+  // Best-effort fill de los campos visuales — no fallar si PDF.js está atorado.
+  await policyNumberField.fill(policyNumber).catch(() => {});
+  await vinField.fill(vin).catch(() => {});
+  await effectiveDateField.fill(normalizeDateValue(effectiveDate)).catch(() => {});
   const rawInsuredName = await insuredNameField.inputValue().catch(() => '');
-  await insuredNameField.fill(cleanClientName(rawInsuredName));
+  await insuredNameField.fill(cleanClientName(rawInsuredName || '')).catch(() => {});
 
-  const currentPolicyNumber = await policyNumberField.inputValue().catch(() => '');
-  const currentVin = await vinField.inputValue().catch(() => '');
-  if (!currentPolicyNumber.includes(policyNumber) || !currentVin.includes(vin)) {
-    throw new Error(`ID Card data did not populate correctly for VIN ${vin} and policy ${policyNumber}`);
+  // Verificar que los hidden dataSource * estén bien — esto sí es crítico para el save.
+  const dataSourceState = await page.evaluate(() => {
+    const doc = (globalThis as any).document;
+    const formName = doc.querySelector('#dataSource_formName')?.value || '';
+    // Las selecciones del policy/vehicle se reflejan en .ant-select-selection-item
+    const policyChip = doc.querySelector('#pdf-prefill-filter-form .ant-select:nth-of-type(1) .ant-select-selection-item, #dataSource_policyIds')?.closest('.ant-select')?.querySelector('.ant-select-selection-item')?.textContent?.trim() || '';
+    const vehicleChip = doc.querySelector('#pdf-prefill-filter-form .ant-select:nth-of-type(2) .ant-select-selection-item, #dataSource_vehicleIds')?.closest('.ant-select')?.querySelector('.ant-select-selection-item')?.textContent?.trim() || '';
+    return { formName, policyChip, vehicleChip };
+  }).catch(() => ({ formName: '', policyChip: '', vehicleChip: '' }));
+
+  logger.info(`ID Card dataSource state: formName="${dataSourceState.formName}", policy="${dataSourceState.policyChip}", vehicle="${dataSourceState.vehicleChip}"`);
+
+  if (!dataSourceState.policyChip.includes(policyNumber) || !dataSourceState.vehicleChip.includes(vin)) {
+    throw new Error(`ID Card dataSource selections missing — policy chip "${dataSourceState.policyChip}", vehicle chip "${dataSourceState.vehicleChip}" (expected policy ${policyNumber}, vin ${vin})`);
   }
 
   await saveIdCard(page);

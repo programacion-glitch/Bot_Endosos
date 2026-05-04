@@ -22,6 +22,7 @@ nul
 inspect/
 inspect_archive/
 .history
+data/
 
 # OS
 Thumbs.db

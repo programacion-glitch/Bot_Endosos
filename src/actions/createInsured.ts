@@ -281,22 +281,55 @@ export async function createInsured(
       }
     }
 
-    // Primary Email — type the email normally so Angular registers the value.
-    // A suggestions popover may appear; we dismiss it without selecting anything.
+    // Primary Email — NowCerts envuelve el input en <trucking-companies-redirect-popover>
+    // que sugiere emails de otros clientes existentes. Si se escribe directamente con
+    // .fill() en el input del popover, NowCerts concatena la sugerencia previa con lo
+    // escrito (ej: "<transportelosmilanos@gmail.com>rbcondelogisticsllc@gmail.com").
+    //
+    // Fix: ubicar el input real del DOM, vaciarlo y setear el valor directamente vía JS
+    // para evitar que el popover dispare su lógica de autocomplete/concat.
     if (cmd.email) {
       const emailInput = page.locator('input[placeholder="Primary Email"]').first();
-      const emailFallback = page.locator('insureds-panel-contacts trucking-companies-redirect-popover input[type="text"]').first();
-      const target = (await emailInput.count() > 0) ? emailInput : (await emailFallback.count() > 0) ? emailFallback : null;
 
-      if (target) {
-        await target.click();
+      if (await emailInput.count() > 0) {
+        await emailInput.scrollIntoViewIfNeeded().catch(() => {});
+        await emailInput.click();
         await page.waitForTimeout(200);
-        await target.fill(cmd.email);
-        await page.waitForTimeout(500);
-        // Dismiss any suggestions popover by pressing Escape, then Tab to move focus away
+
+        // Dismiss any autocomplete popover that opened on focus, BEFORE typing
         await page.keyboard.press('Escape');
         await page.waitForTimeout(300);
-        // Remove any leftover overlay that might block the save button
+        await page.evaluate(() => {
+          const doc = (globalThis as any).document;
+          doc.querySelectorAll('.cdk-overlay-backdrop').forEach((el: any) => el.remove());
+          doc.querySelectorAll('.cdk-overlay-pane').forEach((el: any) => el.remove());
+        });
+
+        // Limpiar el input completamente (Ctrl+A + Delete) y escribir char-by-char.
+        // pressSequentially asegura que Angular reaccione a cada keystroke sin
+        // disparar la auto-completación masiva del popover.
+        await emailInput.click();
+        await page.keyboard.press('Control+A');
+        await page.keyboard.press('Delete');
+        await emailInput.pressSequentially(cmd.email, { delay: 20 });
+        await page.waitForTimeout(300);
+
+        // Verificar que el valor quedó limpio. Si el popover concatenó algo, forzar set vía JS.
+        const finalValue = await emailInput.inputValue().catch(() => '');
+        if (finalValue !== cmd.email) {
+          logger.warn(`Primary Email got "${finalValue}" instead of "${cmd.email}", forcing via JS`);
+          await emailInput.evaluate((el: any, value: string) => {
+            const win = (globalThis as any).window;
+            const setter = Object.getOwnPropertyDescriptor(win.HTMLInputElement.prototype, 'value')?.set;
+            setter?.call(el, value);
+            el.dispatchEvent(new win.Event('input', { bubbles: true }));
+            el.dispatchEvent(new win.Event('change', { bubbles: true }));
+          }, cmd.email);
+        }
+
+        // Tab para mover foco fuera (mejor que Escape — commitea el valor y cierra el popover)
+        await page.keyboard.press('Tab');
+        await page.waitForTimeout(300);
         await page.evaluate(() => {
           const doc = (globalThis as any).document;
           doc.querySelectorAll('.cdk-overlay-backdrop').forEach((el: any) => el.remove());
@@ -306,7 +339,6 @@ export async function createInsured(
       } else {
         logger.warn('Primary Email input not found');
       }
-
     }
 
     // Secondary Email — campo independiente, solo se llena si el correo lo trae

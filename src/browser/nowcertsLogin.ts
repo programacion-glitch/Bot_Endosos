@@ -177,34 +177,58 @@ export async function navigateToClient(
     logger.warn(`Could not set Active filter: ${(err as Error).message}`);
   }
 
-  // Scan ALL insured links and pick the one with the most recent year in the name
+  // Scan ALL insured links and pick the one with the most recent year in the name.
+  //
+  // Edge case: NowCerts puede tener un cliente con sufijo "Only" para gestión interna
+  // (ej: "Cliente X 2026 - 2027" y "Cliente X Only 2026 - 2027"). Reglas:
+  //   - Si el correo (clientName) trae "Only" → preferir el insured con "Only".
+  //   - Si NO trae "Only" → preferir el que NO tiene "Only".
+  // Dentro del grupo elegido, seguimos eligiendo el del año más reciente.
+  const wantsOnly = /\bonly\b/i.test(clientName);
+  const isOnly = (text: string) => /\bonly\b/i.test(text);
+
   const allInsuredLinks = page.locator('a[href*="/AMSINS/Insureds/Details/"]');
   const linkCount = await allInsuredLinks.count();
-  let result = null;
-  let bestYear = -1;
+
+  type Candidate = { idx: number; text: string; maxYear: number; hasOnly: boolean };
+  const candidates: Candidate[] = [];
 
   for (let i = 0; i < linkCount; i++) {
     const link = allInsuredLinks.nth(i);
-    const linkText = await link.textContent() ?? '';
-    logger.info(`Search result [${i}]: "${linkText.trim()}"`);
-    // Extract the highest year from the name (e.g. "2026 - 2027" → 2027)
+    const linkText = (await link.textContent() ?? '').trim();
+    logger.info(`Search result [${i}]: "${linkText}"`);
     const years = linkText.match(/\d{4}/g)?.map(Number) ?? [];
     const maxYear = years.length > 0 ? Math.max(...years) : 0;
-    if (maxYear > bestYear) {
-      result = link;
-      bestYear = maxYear;
+    candidates.push({ idx: i, text: linkText, maxYear, hasOnly: isOnly(linkText) });
+  }
+
+  // Filtrar por preferencia Only / no-Only
+  const preferred = candidates.filter(c => c.hasOnly === wantsOnly);
+  const pool = preferred.length > 0 ? preferred : candidates;
+  if (preferred.length === 0 && candidates.length > 0) {
+    logger.warn(`No candidate matches Only=${wantsOnly} preference, falling back to all candidates`);
+  }
+
+  // Dentro del pool, elegir el de mayor año
+  let bestYear = -1;
+  let bestCandidate: Candidate | null = null;
+  for (const c of pool) {
+    if (c.maxYear > bestYear) {
+      bestCandidate = c;
+      bestYear = c.maxYear;
     }
   }
 
-  // If no years found in any name, fallback to last link
-  if (!result && linkCount > 0) {
-    result = allInsuredLinks.last();
-    logger.info('No year found in results, using last insured link');
+  let result = bestCandidate ? allInsuredLinks.nth(bestCandidate.idx) : null;
+
+  // If no years found in any name, fallback to last link in pool
+  if (!result && pool.length > 0) {
+    result = allInsuredLinks.nth(pool[pool.length - 1].idx);
+    logger.info('No year found in results, using last link in pool');
   }
 
-  if (result) {
-    const selectedText = await result.textContent().catch(() => '');
-    logger.info(`Selected most recent result: "${selectedText?.trim()}" (year: ${bestYear})`);
+  if (result && bestCandidate) {
+    logger.info(`Selected: "${bestCandidate.text}" (year: ${bestYear}, hasOnly: ${bestCandidate.hasOnly}, wantsOnly: ${wantsOnly})`);
   }
 
   if (!result || (await result.count()) === 0) {
