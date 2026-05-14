@@ -13,7 +13,6 @@ import {
   triggerDownload,
   waitForSaveConfirmation,
 } from './_base';
-import { selectRadComboByText } from './_policyHelpers';
 import { screenshot } from '../browser/browserManager';
 
 function normalizeDateValue(value: string): string {
@@ -457,6 +456,8 @@ export async function addVehicle(
     await page.goto(vehiclesUrl, { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(2000);
 
+    // NowCerts migró el form de Vehículos de ASPX legacy a Angular/Momentum (live 2026-05-14).
+    // La URL del Add New ahora es /AMSINS/Vehicles/Insert?parentId=... (ya no /Vehicles/Insert.aspx).
     const addNewLink = page.locator('a.action-insert').filter({ hasText: /\+ Add New/i }).first();
     await addNewLink.waitFor({ state: 'visible', timeout: 20_000 });
     const href = await addNewLink.getAttribute('href');
@@ -465,34 +466,72 @@ export async function addVehicle(
     } else {
       await addNewLink.click({ force: true });
     }
-    await page.waitForURL('**/Vehicles/Insert.aspx**', { timeout: 20_000 }).catch(() => {});
-    await page.waitForTimeout(2000);
+    await page.waitForURL('**/Vehicles/Insert**', { timeout: 20_000 }).catch(() => {});
+    await page.waitForTimeout(3000);
 
-    await selectRadComboByText(
-      page,
-      '#ctl00_ContentPlaceHolder1_FormView1_ctl01_ctl00___Type_ddlEnum_Arrow',
-      inferVehicleType(cmd)
-    );
+    // Helpers para los ng-selects de Angular. El form tiene 8 ng-selects visibles
+    // en este orden de DOM: 0=Type, 1=Year, 2=Usage, 3=Policies, 4=Lien Holder,
+    // 5=Nature of Interest, 6=Drivers, 7=Garaging.
+    const openNgSelect = async (index: number): Promise<void> => {
+      const sel = page.locator('ng-select').nth(index);
+      await sel.scrollIntoViewIfNeeded().catch(() => {});
+      await sel.click({ force: true }).catch(async () => {
+        await sel.evaluate((el: any) => el.click());
+      });
+      await page.waitForTimeout(700);
+    };
 
-    await page.fill('#ContentPlaceHolder1_FormView1_ctl01_ctl01___VIN_Number_txtVin', cmd.vin);
+    const selectNgOption = async (index: number, optionText: string, exact = false): Promise<boolean> => {
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        await openNgSelect(index);
+        const matcher = exact
+          ? new RegExp(`^${escapeRegex(optionText)}$`, 'i')
+          : new RegExp(escapeRegex(optionText), 'i');
+        const option = page.locator('ng-dropdown-panel .ng-option').filter({ hasText: matcher }).first();
+        if (await option.count() > 0) {
+          await option.click({ force: true }).catch(async () => {
+            await option.evaluate((el: any) => el.click());
+          });
+          await page.waitForTimeout(500);
+          return true;
+        }
+        logger.warn(`selectNgOption[${index}] no encontró "${optionText}" en intento ${attempt}/3`);
+        await page.keyboard.press('Escape').catch(() => {});
+        await page.waitForTimeout(400);
+      }
+      return false;
+    };
 
-    await page.click('#ContentPlaceHolder1_FormView1_ctl01_ctl01___VIN_Number_lnkCheckVin');
+    const readNgValue = async (index: number): Promise<string> => {
+      return await page.locator('ng-select').nth(index)
+        .locator('.ng-value-label, .ng-value')
+        .first()
+        .textContent()
+        // El icono × (clear) puede aparecer leading o trailing dependiendo del template
+        .then(t => (t || '').replace(/×/g, '').trim())
+        .catch(() => '');
+    };
+
+    // 1) Type (nth=0)
+    await selectNgOption(0, inferVehicleType(cmd), true);
+
+    // 2) VIN (placeholder)
+    await page.fill('input[placeholder="VIN Number"]', cmd.vin);
+
+    // 3) Check VIN — el botón ahora es <a class="btn btn-additional"> con texto "Check VIN"
+    await page.locator('a.btn-additional').filter({ hasText: /^Check VIN$/i }).first().click({ force: true });
     await page.waitForTimeout(3500);
 
-    // A veces la respuesta de Check VIN tarda más de lo esperado y el Year queda vacío.
-    // Reintentar hasta 3 veces antes de decidir si hay discrepancia o no.
+    // Esperar hasta 3 intentos a que el Year se autopobla
     let vinYear = '';
     for (let attempt = 1; attempt <= 3; attempt++) {
-      vinYear = await page
-        .locator('#ctl00_ContentPlaceHolder1_FormView1_ctl01_ctl03___Year_ComboBox1_Input')
-        .inputValue()
-        .catch(() => '');
+      vinYear = await readNgValue(1);
       if (vinYear) break;
       logger.warn(`addVehicle: Year vacío tras Check VIN (intento ${attempt}/3), esperando...`);
       await page.waitForTimeout(3000);
     }
-    const vinMake = await page.locator('#ContentPlaceHolder1_FormView1_ctl01_ctl02___Make_TextBox1').inputValue().catch(() => '');
-    const vinModel = await page.locator('#ContentPlaceHolder1_FormView1_ctl01_ctl04___Model_TextBox1').inputValue().catch(() => '');
+    const vinMake = await page.locator('input[placeholder="Make"]').inputValue().catch(() => '');
+    const vinModel = await page.locator('input[placeholder="Model"]').inputValue().catch(() => '');
 
     if (vinYear && vinYear !== cmd.year) {
       const alertMsg = [
@@ -511,27 +550,28 @@ export async function addVehicle(
       return fail('ADD_VEHICLE', alertMsg);
     }
 
-    await selectRadComboByText(
-      page,
-      '#ctl00_ContentPlaceHolder1_FormView1_ctl01_ctl03___Year_ComboBox1_Arrow',
-      cmd.year
-    );
-    await page.fill('#ContentPlaceHolder1_FormView1_ctl01_ctl05___Description_TextBox1', cmd.description);
-
-    await selectRadComboByText(
-      page,
-      '#ctl00_ContentPlaceHolder1_FormView1_ctl01_ctl08___TypeOfUse_ddlEnum_Arrow',
-      cmd.usage ?? 'Commercial'
-    );
-
-    if (cmd.value) {
-      await page.fill(
-        '#ContentPlaceHolder1_FormView1_ctl01_ctl09___Price_TextBox1',
-        cmd.value.replace(/[^0-9,.]/g, '')
-      );
+    // 4) Year (nth=1) — override si el autofill no coincide
+    if (vinYear !== cmd.year) {
+      await selectNgOption(1, cmd.year, true);
     }
 
-    await page.click('#btnInsert_input');
+    // 5) Description (placeholder)
+    await page.fill('input[placeholder="Description"]', cmd.description);
+
+    // 6) Usage (nth=2)
+    await selectNgOption(2, cmd.usage ?? 'Commercial', true);
+
+    // 7) Value (placeholder, opcional)
+    if (cmd.value) {
+      await page.fill('input[placeholder="Value"]', cmd.value.replace(/[^0-9,.]/g, ''));
+    }
+
+    // 8) Save Changes — botón Angular
+    const saveBtn = page.locator('button.btn-primary').filter({ hasText: /^Save Changes$/i }).first();
+    await saveBtn.scrollIntoViewIfNeeded().catch(() => {});
+    await saveBtn.click({ force: true }).catch(async () => {
+      await saveBtn.evaluate((el: any) => el.click());
+    });
     await waitForSaveConfirmation(page);
 
     const files: string[] = [];
