@@ -457,12 +457,15 @@ export async function addVehicle(
     await page.waitForTimeout(2000);
 
     // NowCerts migró el form de Vehículos de ASPX legacy a Angular/Momentum (live 2026-05-14).
-    // La URL del Add New ahora es /AMSINS/Vehicles/Insert?parentId=... (ya no /Vehicles/Insert.aspx).
+    // La URL del Add New ahora es relativa: /AMSINS/Vehicles/Insert?parentId=... (ya no
+    // el ASPX absoluto de antes). page.goto() requiere URL absoluta, así que resolvemos
+    // el href contra el origin actual.
     const addNewLink = page.locator('a.action-insert').filter({ hasText: /\+ Add New/i }).first();
     await addNewLink.waitFor({ state: 'visible', timeout: 20_000 });
     const href = await addNewLink.getAttribute('href');
     if (href) {
-      await page.goto(href, { waitUntil: 'domcontentloaded' });
+      const absoluteUrl = href.startsWith('http') ? href : new URL(href, page.url()).toString();
+      await page.goto(absoluteUrl, { waitUntil: 'domcontentloaded' });
     } else {
       await addNewLink.click({ force: true });
     }
