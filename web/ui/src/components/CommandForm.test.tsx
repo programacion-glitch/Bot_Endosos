@@ -60,4 +60,11 @@ describe('CommandForm', () => {
     render(<CommandForm value={gl} onChange={() => {}} />);
     expect(screen.queryByLabelText(/Scheduled Autos/i)).toBeNull();
   });
+
+  it('CREATE_INSURED agrega un driver', () => {
+    const onChange = vi.fn();
+    render(<CommandForm value={defaultCommand('CREATE_INSURED')} onChange={onChange} />);
+    fireEvent.click(screen.getByText(/Agregar driver/i));
+    expect(onChange.mock.calls.at(-1)![0].drivers).toHaveLength(1);
+  });
 });

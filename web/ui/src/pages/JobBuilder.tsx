@@ -4,9 +4,23 @@ import { CommandType, UICommand, JobInputUI } from '../types';
 import { api } from '../api';
 import CommandForm, { defaultCommand, COMMAND_LABELS } from '../components/CommandForm';
 
-const TYPES: CommandType[] = ['ADD_VEHICLE', 'UPDATE_VEHICLE_VALUE', 'DELETE_VEHICLE_VALUE', 'NO_CHANGE'];
+const EXISTING_TYPES: CommandType[] = [
+  'ADD_VEHICLE', 'REMOVE_VEHICLE', 'UPDATE_VEHICLE_VALUE', 'DELETE_VEHICLE_VALUE',
+  'ADD_POLICY', 'UPDATE_LIMIT_DEDUCTIBLE', 'UPDATE_POLICY_NUMBER',
+  'ADD_ADDITIONAL_INSURED', 'ADD_WAIVER_SUBROGATION', 'ADD_AI_AND_WOS',
+  'ADD_NOTE_TO_HOLDER', 'ADD_LOSS_PAYEE', 'UPDATE_HOLDER', 'UPDATE_LP_HOLDER',
+  'REMOVE_HOLDER', 'ADD_NOTE_TO_MASTER', 'UPDATE_MAILING_ADDRESS',
+  'CREATE_MASTER', 'REMOVE_DRIVER', 'NO_CHANGE',
+];
+
+const NEW_TYPES: CommandType[] = [
+  'CREATE_MASTER', 'ADD_VEHICLE', 'ADD_POLICY',
+  'ADD_ADDITIONAL_INSURED', 'ADD_WAIVER_SUBROGATION', 'ADD_AI_AND_WOS',
+  'ADD_NOTE_TO_HOLDER', 'ADD_NOTE_TO_MASTER',
+];
 
 export default function JobBuilder() {
+  const [mode, setMode] = useState<'new_client' | 'existing_client'>('existing_client');
   const [clientName, setClientName] = useState('');
   const [usdot, setUsdot] = useState('');
   const [notifyTo, setNotifyTo] = useState('');
@@ -16,17 +30,26 @@ export default function JobBuilder() {
   const [busy, setBusy] = useState(false);
   const nav = useNavigate();
 
+  function switchMode(m: 'new_client' | 'existing_client') {
+    setMode(m);
+    setCommands(m === 'new_client' ? [defaultCommand('CREATE_INSURED')] : [defaultCommand('ADD_VEHICLE')]);
+  }
+
   const updateCmd = (i: number, c: UICommand) => setCommands(cs => cs.map((x, j) => (j === i ? c : x)));
   const removeCmd = (i: number) => setCommands(cs => cs.filter((_, j) => j !== i));
   const addCmd = (t: CommandType) => setCommands(cs => [...cs, defaultCommand(t)]);
 
-  const canSubmit = clientName.trim() && notifyTo.trim() && commands.length > 0;
+  const effectiveClientName = mode === 'new_client'
+    ? (commands.find(c => c.type === 'CREATE_INSURED') as any)?.name || clientName
+    : clientName;
+
+  const canSubmit = effectiveClientName.trim() && notifyTo.trim() && commands.length > 0;
 
   async function submit() {
     setBusy(true); setError('');
     const job: JobInputUI = {
-      mode: 'existing_client',
-      clientName: clientName.trim(),
+      mode,
+      clientName: effectiveClientName.trim(),
       usdot: usdot.trim() || undefined,
       notifyTo: notifyTo.trim(),
       language,
@@ -46,6 +69,13 @@ export default function JobBuilder() {
     <div className="container">
       <div className="card" style={{ marginBottom: 16 }}>
         <h2 style={{ marginTop: 0 }}>Nuevo endoso</h2>
+        <div className="field">
+          <label>Tipo de solicitud</label>
+          <div className="row">
+            <button type="button" className={mode === 'existing_client' ? '' : 'secondary'} onClick={() => switchMode('existing_client')}>Cliente existente (endoso)</button>
+            <button type="button" className={mode === 'new_client' ? '' : 'secondary'} onClick={() => switchMode('new_client')}>Cliente nuevo (documentar)</button>
+          </div>
+        </div>
         <div className="row">
           <div className="field" style={{ flex: 2 }}>
             <label>Cliente (nombre en NowCerts)</label>
@@ -84,7 +114,7 @@ export default function JobBuilder() {
       <div className="card">
         <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--h2o-gray)' }}>Agregar acción</label>
         <div className="row" style={{ marginTop: 8 }}>
-          {TYPES.map(t => (
+          {(mode === 'new_client' ? NEW_TYPES : EXISTING_TYPES).map(t => (
             <button key={t} className="secondary" onClick={() => addCmd(t)}>+ {COMMAND_LABELS[t]}</button>
           ))}
         </div>

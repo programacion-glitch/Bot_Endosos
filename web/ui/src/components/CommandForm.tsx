@@ -1,6 +1,7 @@
 import { CommandType, PolicyType, UICommand, UIDriver, UIHolder } from '../types';
 import { HolderFields, PolicyPicker } from './HolderFields';
 import { PolicyFields } from './PolicyFields';
+import { CreateInsuredFields } from './CreateInsuredFields';
 
 const emptyHolder = (): UIHolder => ({ name: '', address: '', note: '' });
 
@@ -214,7 +215,7 @@ export default function CommandForm({ value, onChange, instanceId = 0 }:
     case 'UPDATE_LIMIT_DEDUCTIBLE':
       return <PolicyFields instanceId={instanceId} showAutos={false} value={value} onChange={patch => set(patch as Partial<UICommand>)} />;
 
-    default:
-      return null;
+    case 'CREATE_INSURED':
+      return <CreateInsuredFields instanceId={instanceId} value={value} onChange={patch => set(patch as Partial<UICommand>)} />;
   }
 }
