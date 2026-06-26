@@ -87,4 +87,21 @@ describe('validateJobInput', () => {
     ] });
     expect(res.ok).toBe(true);
   });
+
+  // ── Pólizas (Fase 3 – Task 3) ─────────────────────────────────────────────
+
+  it('acepta ADD_POLICY AL con scheduledAutos', () => {
+    const res = validateJobInput({ ...baseJob, commands: [{ type: 'ADD_POLICY', rawText: '', policyType: 'AL', carrier: 'County Hall', mga: 'County Hall RRG', policyNumber: 'Fake-5445', effectiveDate: '03/05/2026', expirationDate: '03/05/2027', limit: '$500,000', scheduledAutos: true }] });
+    expect(res.ok).toBe(true);
+  });
+
+  it('rechaza ADD_POLICY sin carrier', () => {
+    const res = validateJobInput({ ...baseJob, commands: [{ type: 'ADD_POLICY', rawText: '', policyType: 'AL', carrier: '', mga: 'm', policyNumber: 'p', effectiveDate: 'd', expirationDate: 'd' }] });
+    expect(res.ok).toBe(false);
+  });
+
+  it('acepta UPDATE_LIMIT_DEDUCTIBLE', () => {
+    const res = validateJobInput({ ...baseJob, commands: [{ type: 'UPDATE_LIMIT_DEDUCTIBLE', rawText: '', policyType: 'GL', eachOccurrence: '$1,000,000' }] });
+    expect(res.ok).toBe(true);
+  });
 });

@@ -85,6 +85,45 @@ export const addLossPayeeSchema = z.object({ type: z.literal('ADD_LOSS_PAYEE'), 
 export const updateHolderSchema = z.object({ type: z.literal('UPDATE_HOLDER'), rawText, holderName: z.string().min(1), updateTo: z.string().min(1), note: z.string().optional() });
 export const updateLPHolderSchema = z.object({ type: z.literal('UPDATE_LP_HOLDER'), rawText, vin: z.string().min(1), holderName: z.string().min(1), updateTo: z.string().min(1), note: z.string().optional() });
 
+// ── Pólizas (Fase 3 – Task 3) ─────────────────────────────────────────────────
+
+const coverageFields = {
+  limit: z.string().optional(),
+  deductible: z.string().optional(),
+  eachOccurrence: z.string().optional(),
+  damageToRentedPremises: z.string().optional(),
+  medExp: z.string().optional(),
+  personalAdvInjury: z.string().optional(),
+  generalAggregate: z.string().optional(),
+  productsCompOpAgg: z.string().optional(),
+  elEachAccident: z.string().optional(),
+  elDiseaseEaEmployee: z.string().optional(),
+  elDiseasePolicyLimit: z.string().optional(),
+  aggregate: z.string().optional(),
+};
+
+export const addPolicySchema = z.object({
+  type: z.literal('ADD_POLICY'), rawText,
+  policyType: policyTypeSchema,
+  carrier: z.string().min(1, 'Carrier requerido'),
+  mga: z.string().min(1, 'MGA requerido'),
+  policyNumber: z.string().min(1, 'Número de póliza requerido'),
+  effectiveDate: z.string().min(1, 'Effective Date requerida'),
+  expirationDate: z.string().min(1, 'Expiration Date requerida'),
+  anyAuto: z.boolean().optional(),
+  allOwnedAutos: z.boolean().optional(),
+  scheduledAutos: z.boolean().optional(),
+  hiredAutos: z.boolean().optional(),
+  nonOwnedAutos: z.boolean().optional(),
+  ...coverageFields,
+});
+
+export const updateLimitDeductibleSchema = z.object({
+  type: z.literal('UPDATE_LIMIT_DEDUCTIBLE'), rawText,
+  policyType: policyTypeSchema,
+  ...coverageFields,
+});
+
 export const commandSchema = z.discriminatedUnion('type', [
   noChangeSchema,
   addVehicleSchema,
@@ -104,6 +143,8 @@ export const commandSchema = z.discriminatedUnion('type', [
   addLossPayeeSchema,
   updateHolderSchema,
   updateLPHolderSchema,
+  addPolicySchema,
+  updateLimitDeductibleSchema,
 ]);
 
 // Fase 1: solo modo existing_client (endosos). new_client + CREATE_INSURED en fase posterior.
