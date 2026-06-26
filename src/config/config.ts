@@ -64,6 +64,12 @@ export const config = {
     pollIntervalMs: parseInt(optional('QUEUE_POLL_INTERVAL_MS', '5000')),
   },
 
+  web: {
+    port: parseInt(optional('WEB_PORT', '4000')),
+    sessionSecret: optional('SESSION_SECRET', 'dev-insecure-secret-change-me'),
+    usersDbPath: path.resolve(optional('USERS_DB_PATH', './data/users.db')),
+  },
+
   playwright: {
     headless: optional('HEADLESS', 'false') === 'true',
     slowMo: parseInt(optional('BROWSER_SLOW_MO', '100')),
