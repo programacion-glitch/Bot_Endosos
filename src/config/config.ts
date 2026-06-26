@@ -57,6 +57,14 @@ export const config = {
     logsPath: path.resolve('./logs'),
   },
 
+  jobs: {
+    dbPath: path.resolve(optional('JOBS_DB_PATH', './data/jobs.db')),
+  },
+
+  queue: {
+    pollIntervalMs: parseInt(optional('QUEUE_POLL_INTERVAL_MS', '5000')),
+  },
+
   playwright: {
     headless: optional('HEADLESS', 'false') === 'true',
     slowMo: parseInt(optional('BROWSER_SLOW_MO', '100')),
