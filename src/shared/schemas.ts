@@ -124,6 +124,18 @@ export const updateLimitDeductibleSchema = z.object({
   ...coverageFields,
 });
 
+export const createInsuredSchema = z.object({
+  type: z.literal('CREATE_INSURED'), rawText,
+  name: z.string().min(1, 'Nombre requerido'),
+  dba: z.string().optional(),
+  address: z.string().min(1, 'Dirección requerida'),
+  usdot: z.string().min(1, 'USDOT requerido'),
+  drivers: z.array(driverSchema),
+  phone: z.string().min(1, 'Teléfono requerido'),
+  email: z.string().email('Email inválido'),
+  secondaryEmail: z.string().email('Email secundario inválido').optional(),
+});
+
 export const commandSchema = z.discriminatedUnion('type', [
   noChangeSchema,
   addVehicleSchema,
@@ -145,11 +157,11 @@ export const commandSchema = z.discriminatedUnion('type', [
   updateLPHolderSchema,
   addPolicySchema,
   updateLimitDeductibleSchema,
+  createInsuredSchema,
 ]);
 
-// Fase 1: solo modo existing_client (endosos). new_client + CREATE_INSURED en fase posterior.
 export const jobInputSchema = z.object({
-  mode: z.literal('existing_client'),
+  mode: z.enum(['new_client', 'existing_client']),
   clientName: z.string().min(1, 'Nombre de cliente requerido'),
   usdot: z.string().optional(),
   dba: z.string().optional(),
@@ -157,6 +169,14 @@ export const jobInputSchema = z.object({
   notifyTo: z.string().email('notifyTo debe ser un email válido'),
   language: z.enum(['es', 'en']),
   createdBy: z.string().min(1, 'createdBy requerido'),
+}).superRefine((job, ctx) => {
+  const hasCreate = job.commands.some(c => c.type === 'CREATE_INSURED');
+  if (job.mode === 'new_client' && !hasCreate) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['commands'], message: 'Modo cliente nuevo requiere un comando Create Insured' });
+  }
+  if (job.mode === 'existing_client' && hasCreate) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['commands'], message: 'Cliente existente no puede incluir Create Insured' });
+  }
 });
 
 // Guard: si jobInputSchema deja de ser asignable a JobInput, esto falla en compilación.

@@ -104,4 +104,23 @@ describe('validateJobInput', () => {
     const res = validateJobInput({ ...baseJob, commands: [{ type: 'UPDATE_LIMIT_DEDUCTIBLE', rawText: '', policyType: 'GL', eachOccurrence: '$1,000,000' }] });
     expect(res.ok).toBe(true);
   });
+
+  // ── CREATE_INSURED + modo new_client (Fase 3 – Task 4) ───────────────────────
+
+  const insured = { type: 'CREATE_INSURED', rawText: '', name: 'Pix Test', address: '123 Main, Dallas, TX, 75201', usdot: '123', phone: '2145551234', email: 'a@b.com', drivers: [{ firstName: 'Juan', lastName: 'Perez', cdl: 'TX1', cdlState: 'TX', dob: '01/15/1988' }] };
+
+  it('acepta new_client con CREATE_INSURED', () => {
+    const res = validateJobInput({ ...baseJob, mode: 'new_client', commands: [insured] });
+    expect(res.ok).toBe(true);
+  });
+
+  it('rechaza new_client SIN CREATE_INSURED (coherencia)', () => {
+    const res = validateJobInput({ ...baseJob, mode: 'new_client', commands: [{ type: 'NO_CHANGE', rawText: '' }] });
+    expect(res.ok).toBe(false);
+  });
+
+  it('rechaza existing_client CON CREATE_INSURED (coherencia)', () => {
+    const res = validateJobInput({ ...baseJob, mode: 'existing_client', commands: [insured] });
+    expect(res.ok).toBe(false);
+  });
 });
