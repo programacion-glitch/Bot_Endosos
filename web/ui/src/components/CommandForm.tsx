@@ -1,4 +1,3 @@
-import { useRef } from 'react';
 import { CommandType, PolicyType, UICommand, UIDriver, UIHolder } from '../types';
 import { HolderFields, PolicyPicker } from './HolderFields';
 
@@ -46,16 +45,7 @@ export const COMMAND_LABELS: Record<CommandType, string> = {
 
 export default function CommandForm({ value, onChange, instanceId = 0 }:
   { value: UICommand; onChange: (c: UICommand) => void; instanceId?: number }) {
-  // Synced ref so that consecutive fireEvent calls in tests (and rapid real interactions)
-  // both appear in the last onChange — ref.current is reset to the prop value on each render
-  // but mutated locally between renders so accumulated patches carry over.
-  const ref = useRef(value);
-  ref.current = value;
-  const set = (patch: Partial<UICommand>) => {
-    const next = { ...ref.current, ...patch } as UICommand;
-    ref.current = next;
-    onChange(next);
-  };
+  const set = (patch: Partial<UICommand>) => onChange({ ...value, ...patch } as UICommand);
 
   switch (value.type) {
     case 'NO_CHANGE':

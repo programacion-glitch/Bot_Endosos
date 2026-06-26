@@ -43,9 +43,8 @@ describe('CommandForm', () => {
     const onChange = vi.fn();
     render(<CommandForm value={defaultCommand('ADD_ADDITIONAL_INSURED')} onChange={onChange} />);
     fireEvent.change(screen.getByLabelText(/Nombre del holder/i), { target: { value: 'RXO LLC' } });
+    expect(onChange.mock.calls.at(-1)![0].holder.name).toBe('RXO LLC');
     fireEvent.click(screen.getByLabelText('AL'));
-    const last = onChange.mock.calls.at(-1)![0];
-    expect(last.holder.name).toBe('RXO LLC');
-    expect(last.policies).toContain('AL');
+    expect(onChange.mock.calls.at(-1)![0].policies).toContain('AL');
   });
 });
