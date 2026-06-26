@@ -20,7 +20,8 @@ export const COMMAND_LABELS: Record<CommandType, string> = {
   NO_CHANGE: 'Sin cambios (Recibido)',
 };
 
-export default function CommandForm({ value, onChange }: { value: UICommand; onChange: (c: UICommand) => void }) {
+export default function CommandForm({ value, onChange, instanceId = 0 }:
+  { value: UICommand; onChange: (c: UICommand) => void; instanceId?: number }) {
   const set = (patch: Partial<UICommand>) => onChange({ ...value, ...patch } as UICommand);
 
   if (value.type === 'NO_CHANGE') {
@@ -30,30 +31,30 @@ export default function CommandForm({ value, onChange }: { value: UICommand; onC
   return (
     <>
       <div className="field">
-        <label htmlFor="cmd-vin">VIN</label>
-        <input id="cmd-vin" value={value.vin} onChange={e => set({ vin: e.target.value })} />
+        <label htmlFor={`cmd-${instanceId}-vin`}>VIN</label>
+        <input id={`cmd-${instanceId}-vin`} value={value.vin} onChange={e => set({ vin: e.target.value })} />
       </div>
 
       {value.type === 'ADD_VEHICLE' && (
         <>
           <div className="row">
             <div className="field" style={{ flex: 1 }}>
-              <label htmlFor="cmd-year">Año</label>
-              <input id="cmd-year" value={value.year} onChange={e => set({ year: e.target.value })} placeholder="2007" />
+              <label htmlFor={`cmd-${instanceId}-year`}>Año</label>
+              <input id={`cmd-${instanceId}-year`} value={value.year} onChange={e => set({ year: e.target.value })} placeholder="2007" />
             </div>
             <div className="field" style={{ flex: 2 }}>
-              <label htmlFor="cmd-desc">Descripción</label>
-              <input id="cmd-desc" value={value.description} onChange={e => set({ description: e.target.value })} placeholder="VOLVO" />
+              <label htmlFor={`cmd-${instanceId}-desc`}>Descripción</label>
+              <input id={`cmd-${instanceId}-desc`} value={value.description} onChange={e => set({ description: e.target.value })} placeholder="VOLVO" />
             </div>
           </div>
           <div className="row">
             <div className="field" style={{ flex: 1 }}>
-              <label htmlFor="cmd-value">Valor (opcional)</label>
-              <input id="cmd-value" value={value.value ?? ''} onChange={e => set({ value: e.target.value })} placeholder="$15,000" />
+              <label htmlFor={`cmd-${instanceId}-value`}>Valor (opcional)</label>
+              <input id={`cmd-${instanceId}-value`} value={value.value ?? ''} onChange={e => set({ value: e.target.value })} placeholder="$15,000" />
             </div>
             <div className="field" style={{ flex: 1 }}>
-              <label htmlFor="cmd-effdate">Effective Date</label>
-              <input id="cmd-effdate" value={value.effectiveDate} onChange={e => set({ effectiveDate: e.target.value })} placeholder="03/05/2026" />
+              <label htmlFor={`cmd-${instanceId}-effdate`}>Effective Date</label>
+              <input id={`cmd-${instanceId}-effdate`} value={value.effectiveDate} onChange={e => set({ effectiveDate: e.target.value })} placeholder="03/05/2026" />
             </div>
           </div>
         </>
@@ -61,8 +62,8 @@ export default function CommandForm({ value, onChange }: { value: UICommand; onC
 
       {value.type === 'UPDATE_VEHICLE_VALUE' && (
         <div className="field">
-          <label htmlFor="cmd-newvalue">Nuevo valor</label>
-          <input id="cmd-newvalue" value={value.value} onChange={e => set({ value: e.target.value })} placeholder="15,000" />
+          <label htmlFor={`cmd-${instanceId}-newvalue`}>Nuevo valor</label>
+          <input id={`cmd-${instanceId}-newvalue`} value={value.value} onChange={e => set({ value: e.target.value })} placeholder="15,000" />
         </div>
       )}
     </>

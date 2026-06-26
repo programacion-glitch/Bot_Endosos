@@ -77,7 +77,7 @@ export default function JobBuilder() {
             <strong>{COMMAND_LABELS[c.type]}</strong>
             <button className="secondary" onClick={() => removeCmd(i)} disabled={commands.length === 1}>Quitar</button>
           </div>
-          <CommandForm value={c} onChange={cmd => updateCmd(i, cmd)} />
+          <CommandForm value={c} instanceId={i} onChange={cmd => updateCmd(i, cmd)} />
         </div>
       ))}
 
