@@ -65,4 +65,26 @@ describe('validateJobInput', () => {
     const res = validateJobInput({ ...baseJob, commands: [{ type: 'REMOVE_DRIVER', rawText: '', driver: { firstName: 'Juan', lastName: 'Perez', cdl: 'TX1', cdlState: 'TX' } }] });
     expect(res.ok).toBe(true);
   });
+
+  // ── Grupo holder / loss-payee (Fase 3 – Task 2) ───────────────────────────
+
+  const holder = { name: 'Holder LLC', address: '500 Market St, Houston, TX, 77002', note: 'As per contract' };
+
+  it('acepta ADD_ADDITIONAL_INSURED con holder y policies', () => {
+    const res = validateJobInput({ ...baseJob, commands: [{ type: 'ADD_ADDITIONAL_INSURED', rawText: '', policies: ['AL', 'GL'], holder }] });
+    expect(res.ok).toBe(true);
+  });
+
+  it('rechaza AI sin holder.name', () => {
+    const res = validateJobInput({ ...baseJob, commands: [{ type: 'ADD_ADDITIONAL_INSURED', rawText: '', policies: ['AL'], holder: { name: '', address: 'x' } }] });
+    expect(res.ok).toBe(false);
+  });
+
+  it('acepta ADD_LOSS_PAYEE y UPDATE_HOLDER', () => {
+    const res = validateJobInput({ ...baseJob, commands: [
+      { type: 'ADD_LOSS_PAYEE', rawText: '', vin: 'V1', holder },
+      { type: 'UPDATE_HOLDER', rawText: '', holderName: 'Old LLC', updateTo: 'New LLC' },
+    ] });
+    expect(res.ok).toBe(true);
+  });
 });

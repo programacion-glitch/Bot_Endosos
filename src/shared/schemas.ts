@@ -73,6 +73,18 @@ export const addNoteToMasterSchema = z.object({ type: z.literal('ADD_NOTE_TO_MAS
 export const updateMailingAddressSchema = z.object({ type: z.literal('UPDATE_MAILING_ADDRESS'), rawText, address: z.string().min(1, 'Dirección requerida') });
 export const updatePolicyNumberSchema = z.object({ type: z.literal('UPDATE_POLICY_NUMBER'), rawText, policyType: policyTypeSchema, newPolicyNumber: z.string().min(1, 'Nuevo número requerido') });
 
+// ── Grupo holder / loss-payee ─────────────────────────────────────────────────
+
+const policiesArray = z.array(z.string().min(1)).min(1, 'Indica al menos una póliza');
+
+export const addAdditionalInsuredSchema = z.object({ type: z.literal('ADD_ADDITIONAL_INSURED'), rawText, policies: policiesArray, holder: holderSchema });
+export const addWaiverSubrogationSchema = z.object({ type: z.literal('ADD_WAIVER_SUBROGATION'), rawText, policies: policiesArray, holder: holderSchema });
+export const addAIAndWOSSchema = z.object({ type: z.literal('ADD_AI_AND_WOS'), rawText, policies: policiesArray, holder: holderSchema });
+export const addNoteToHolderSchema = z.object({ type: z.literal('ADD_NOTE_TO_HOLDER'), rawText, holder: holderSchema });
+export const addLossPayeeSchema = z.object({ type: z.literal('ADD_LOSS_PAYEE'), rawText, vin: z.string().min(1), holder: holderSchema, policyLabel: z.string().optional() });
+export const updateHolderSchema = z.object({ type: z.literal('UPDATE_HOLDER'), rawText, holderName: z.string().min(1), updateTo: z.string().min(1), note: z.string().optional() });
+export const updateLPHolderSchema = z.object({ type: z.literal('UPDATE_LP_HOLDER'), rawText, vin: z.string().min(1), holderName: z.string().min(1), updateTo: z.string().min(1), note: z.string().optional() });
+
 export const commandSchema = z.discriminatedUnion('type', [
   noChangeSchema,
   addVehicleSchema,
@@ -85,6 +97,13 @@ export const commandSchema = z.discriminatedUnion('type', [
   addNoteToMasterSchema,
   updateMailingAddressSchema,
   updatePolicyNumberSchema,
+  addAdditionalInsuredSchema,
+  addWaiverSubrogationSchema,
+  addAIAndWOSSchema,
+  addNoteToHolderSchema,
+  addLossPayeeSchema,
+  updateHolderSchema,
+  updateLPHolderSchema,
 ]);
 
 // Fase 1: solo modo existing_client (endosos). new_client + CREATE_INSURED en fase posterior.
