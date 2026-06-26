@@ -22,8 +22,8 @@ vi.mock('../email/emailSender', () => ({
 
 import { processJob } from './processJob';
 import { dispatchCommands } from '../actions/dispatcher';
-import { navigateToClient } from '../browser/nowcertsLogin';
-import { sendReviewEmail } from '../email/emailSender';
+import { getNowCertsPage, navigateToClient } from '../browser/nowcertsLogin';
+import { sendReviewEmail, sendErrorNotification, sendAlertEmail } from '../email/emailSender';
 
 const email: ParsedEmail = {
   uid: 0, subject: '[PORTAL] Pix', from: 'a@h2oins.com', to: 'a@h2oins.com', body: '',
@@ -33,6 +33,12 @@ const email: ParsedEmail = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // clearAllMocks borra el historial de llamadas pero NO restablece las
+  // implementaciones (p.ej. mockRejectedValue del test de doble falla),
+  // así que reponemos los defaults felices para que los tests sean
+  // independientes del orden de ejecución.
+  (getNowCertsPage as any).mockResolvedValue({ url: () => 'https://nowcerts.com/AMSINS/x' });
+  (navigateToClient as any).mockResolvedValue(true);
 });
 
 describe('processJob', () => {
@@ -44,6 +50,7 @@ describe('processJob', () => {
     expect(out.allSucceeded).toBe(true);
     expect(out.files).toContain('/d/cert.pdf');
     expect(sendReviewEmail).toHaveBeenCalledOnce();
+    expect(sendErrorNotification).not.toHaveBeenCalled();
   });
 
   it('devuelve allSucceeded=false cuando un comando falla', async () => {
@@ -54,6 +61,9 @@ describe('processJob', () => {
     expect(out.allSucceeded).toBe(false);
     expect(out.errorMessage).toContain('NO_CHANGE');
     expect(out.files).toContain('/d/err.png');
+    // El review email SIEMPRE se manda, incluso cuando hay fallos.
+    expect(sendReviewEmail).toHaveBeenCalledOnce();
+    expect(sendErrorNotification).toHaveBeenCalledOnce();
   });
 
   it('devuelve allSucceeded=false cuando el cliente no se encuentra', async () => {
@@ -61,6 +71,16 @@ describe('processJob', () => {
     const out = await processJob(email);
     expect(out.allSucceeded).toBe(false);
     expect(out.errorMessage?.toLowerCase()).toContain('cliente');
+    expect(dispatchCommands).not.toHaveBeenCalled();
+    // El alert a email.from es el efecto secundario que define esta rama.
+    expect(sendAlertEmail).toHaveBeenCalledOnce();
+  });
+
+  it('devuelve allSucceeded=false cuando el navegador falla en ambos intentos', async () => {
+    (getNowCertsPage as any).mockRejectedValue(new Error('browser dead'));
+    const out = await processJob(email);
+    expect(out.allSucceeded).toBe(false);
+    expect(sendErrorNotification).toHaveBeenCalled();
     expect(dispatchCommands).not.toHaveBeenCalled();
   });
 });
