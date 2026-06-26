@@ -84,9 +84,9 @@ export function openJobStore(dbPath: string): JobStore {
             @notify_to, @language, @created_by, @created_at)
   `);
   const selectById = db.prepare(`SELECT * FROM jobs WHERE id = ?`);
-  const selectAll = db.prepare(`SELECT * FROM jobs ORDER BY created_at DESC`);
+  const selectAll = db.prepare(`SELECT * FROM jobs ORDER BY created_at DESC, rowid DESC`);
   const selectOldestQueued = db.prepare(
-    `SELECT * FROM jobs WHERE status = 'queued' ORDER BY created_at ASC LIMIT 1`
+    `SELECT * FROM jobs WHERE status = 'queued' ORDER BY created_at ASC, rowid ASC LIMIT 1`
   );
   const setProcessing = db.prepare(
     `UPDATE jobs SET status = 'processing', started_at = @started_at WHERE id = @id`

@@ -2,7 +2,6 @@ import imapSimple, { ImapSimple, Message } from 'imap-simple';
 import { simpleParser } from 'mailparser';
 import { config } from '../config/config';
 import { logger } from '../utils/logger';
-import { sleep } from '../utils/retry';
 
 export interface RawEmail {
   uid: number;
@@ -194,27 +193,3 @@ export async function closeImap(): Promise<void> {
   }
 }
 
-/**
- * Main polling loop. Calls the callback with each batch of new emails.
- * Continues indefinitely until the process is killed.
- */
-export async function startPolling(
-  onEmails: (emails: RawEmail[]) => Promise<void>
-): Promise<void> {
-  logger.info(`Starting IMAP polling every ${config.imap.pollIntervalMs / 1000}s...`);
-
-  while (true) {
-    try {
-      const emails = await fetchUnseenEmails();
-      if (emails.length > 0) {
-        await onEmails(emails);
-      }
-    } catch (err) {
-      logger.error(`Polling error: ${(err as Error).message}`);
-      // Reset connection on error
-      connection = null;
-    }
-
-    await sleep(config.imap.pollIntervalMs);
-  }
-}

@@ -74,5 +74,6 @@ describe('jobStore', () => {
     store.createJob(input);
     store.createJob({ ...input, clientName: 'Otro' });
     expect(store.listJobs()).toHaveLength(2);
+    expect(store.listJobs()[0].clientName).toBe('Otro');
   });
 });

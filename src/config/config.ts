@@ -20,7 +20,6 @@ export const config = {
     user: required('IMAP_USER'),
     password: required('IMAP_PASSWORD'),
     mailbox: optional('IMAP_MAILBOX', 'INBOX'),
-    pollIntervalMs: parseInt(optional('IMAP_POLL_INTERVAL_MS', '30000')),
     tls: true,
   },
 
