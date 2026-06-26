@@ -24,4 +24,18 @@ describe('CommandForm', () => {
     render(<CommandForm value={defaultCommand('NO_CHANGE')} onChange={() => {}} />);
     expect(screen.queryByLabelText(/VIN/i)).toBeNull();
   });
+
+  it('REMOVE_HOLDER edita holderName', () => {
+    const onChange = vi.fn();
+    render(<CommandForm value={defaultCommand('REMOVE_HOLDER')} onChange={onChange} />);
+    fireEvent.change(screen.getByLabelText(/Holder/i), { target: { value: 'ACME LLC' } });
+    expect(onChange.mock.calls.at(-1)![0]).toMatchObject({ type: 'REMOVE_HOLDER', holderName: 'ACME LLC' });
+  });
+
+  it('UPDATE_POLICY_NUMBER cambia policyType y número', () => {
+    const onChange = vi.fn();
+    render(<CommandForm value={defaultCommand('UPDATE_POLICY_NUMBER')} onChange={onChange} />);
+    fireEvent.change(screen.getByLabelText(/Nuevo n[uú]mero/i), { target: { value: 'X-99' } });
+    expect(onChange.mock.calls.at(-1)![0]).toMatchObject({ type: 'UPDATE_POLICY_NUMBER', newPolicyNumber: 'X-99' });
+  });
 });

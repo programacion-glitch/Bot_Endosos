@@ -1,4 +1,4 @@
-import { CommandType, UICommand, UIHolder } from '../types';
+import { CommandType, PolicyType, UICommand, UIDriver, UIHolder } from '../types';
 
 const emptyHolder = (): UIHolder => ({ name: '', address: '', note: '' });
 
@@ -100,6 +100,62 @@ export default function CommandForm({ value, onChange, instanceId = 0 }:
         <div className="field">
           <label htmlFor={`cmd-${instanceId}-vin`}>VIN</label>
           <input id={`cmd-${instanceId}-vin`} value={value.vin} onChange={e => set({ vin: e.target.value })} />
+        </div>
+      );
+
+    case 'CREATE_MASTER':
+      return <p style={{ color: 'var(--h2o-gray)', margin: 0 }}>Crea el certificado master del asegurado.</p>;
+
+    case 'REMOVE_DRIVER': {
+      const d = value.driver;
+      const setD = (patch: Partial<UIDriver>) => set({ driver: { ...d, ...patch } } as Partial<UICommand>);
+      return (
+        <div className="row">
+          <div className="field" style={{ flex: 1 }}><label htmlFor={`cmd-${instanceId}-fn`}>Nombre</label><input id={`cmd-${instanceId}-fn`} value={d.firstName} onChange={e => setD({ firstName: e.target.value })} /></div>
+          <div className="field" style={{ flex: 1 }}><label htmlFor={`cmd-${instanceId}-ln`}>Apellido</label><input id={`cmd-${instanceId}-ln`} value={d.lastName} onChange={e => setD({ lastName: e.target.value })} /></div>
+          <div className="field" style={{ flex: 1 }}><label htmlFor={`cmd-${instanceId}-cdl`}>CDL</label><input id={`cmd-${instanceId}-cdl`} value={d.cdl} onChange={e => setD({ cdl: e.target.value })} /></div>
+          <div className="field" style={{ flex: 1 }}><label htmlFor={`cmd-${instanceId}-cdls`}>Estado CDL</label><input id={`cmd-${instanceId}-cdls`} value={d.cdlState} onChange={e => setD({ cdlState: e.target.value })} /></div>
+        </div>
+      );
+    }
+
+    case 'REMOVE_HOLDER':
+      return (
+        <div className="field">
+          <label htmlFor={`cmd-${instanceId}-hn`}>Holder</label>
+          <input id={`cmd-${instanceId}-hn`} value={value.holderName} onChange={e => set({ holderName: e.target.value })} />
+        </div>
+      );
+
+    case 'ADD_NOTE_TO_MASTER':
+      return (
+        <div className="field">
+          <label htmlFor={`cmd-${instanceId}-note`}>Nota</label>
+          <textarea id={`cmd-${instanceId}-note`} value={value.note} onChange={e => set({ note: e.target.value })} rows={3} />
+        </div>
+      );
+
+    case 'UPDATE_MAILING_ADDRESS':
+      return (
+        <div className="field">
+          <label htmlFor={`cmd-${instanceId}-addr`}>Nueva dirección</label>
+          <input id={`cmd-${instanceId}-addr`} value={value.address} onChange={e => set({ address: e.target.value })} placeholder="555 Estadio Rd, Dallas, TX, 75201" />
+        </div>
+      );
+
+    case 'UPDATE_POLICY_NUMBER':
+      return (
+        <div className="row">
+          <div className="field" style={{ flex: 1 }}>
+            <label htmlFor={`cmd-${instanceId}-pt`}>Tipo de póliza</label>
+            <select id={`cmd-${instanceId}-pt`} value={value.policyType} onChange={e => set({ policyType: e.target.value as PolicyType })}>
+              {(['AL', 'MTC', 'APD', 'GL', 'WC', 'EXL', 'NTL'] as PolicyType[]).map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </div>
+          <div className="field" style={{ flex: 2 }}>
+            <label htmlFor={`cmd-${instanceId}-num`}>Nuevo número</label>
+            <input id={`cmd-${instanceId}-num`} value={value.newPolicyNumber} onChange={e => set({ newPolicyNumber: e.target.value })} />
+          </div>
         </div>
       );
 
