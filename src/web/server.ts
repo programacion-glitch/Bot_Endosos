@@ -24,3 +24,11 @@ app.listen(config.web.port, () => {
     logger.warn('SESSION_SECRET por defecto — define uno propio en .env para producción.');
   }
 });
+
+function shutdown(): void {
+  try { jobStore.close(); } catch { /* ignore */ }
+  try { userStore.close(); } catch { /* ignore */ }
+  process.exit(0);
+}
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);

@@ -9,7 +9,7 @@ export default function Jobs() {
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
-    try { setJobs(await api.listJobs()); } catch (e) { setError((e as Error).message); }
+    try { setError(''); setJobs(await api.listJobs()); } catch (e) { setError((e as Error).message); }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -39,13 +39,14 @@ export default function Jobs() {
           </div>
           {job.resultSummary && <pre style={{ whiteSpace: 'pre-wrap', fontSize: 13, marginTop: 8 }}>{job.resultSummary}</pre>}
           {job.errorMessage && <p className="error">{job.errorMessage}</p>}
-          {(job.resultFiles ?? []).length > 0 && (
+          {(() => { const files = job.resultFiles ?? []; return files.length > 0 && (
             <div className="row" style={{ marginTop: 8 }}>
-              {job.resultFiles!.map(f => (
-                <a key={f} href={`/api/jobs/${job.id}/files/${encodeURIComponent(basename(f))}`}>{basename(f)}</a>
-              ))}
+              {files.map(f => {
+                const name = basename(f);
+                return <a key={f} href={`/api/jobs/${job.id}/files/${encodeURIComponent(name)}`}>{name}</a>;
+              })}
             </div>
-          )}
+          ); })()}
         </div>
       ))}
     </div>

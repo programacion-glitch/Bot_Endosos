@@ -128,3 +128,9 @@ Abrir **http://localhost:4000** (la API sirve directamente la UI compilada).
 - La UI (React + Vite) y la API (Express) comparten tipos a través de `src/shared/`. No hay duplicación de esquemas.
 - En `fase 2.5` se añadirá el servicio `web` a `docker-compose` con `Dockerfile.web`.
 - Para producción real: usar `SESSION_SECRET` fuerte, cookie `secure: true` detrás de TLS/reverse-proxy.
+
+## Limitaciones conocidas (Fase 2)
+
+- **Sesiones en memoria:** la API usa el `MemoryStore` por defecto de express-session. Reiniciar la API cierra la sesión de todos los usuarios (deben volver a entrar). Suficiente para un portal interno de una sola instancia; reemplazar por un store persistente (p.ej. connect-sqlite3) en la fase 2.5 / producción.
+- **Cookie `secure`:** solo se marca `secure` cuando `NODE_ENV=production`. Detrás de un reverse proxy con TLS, además hay que `app.set('trust proxy', 1)`.
+- **Sin rate limiting** en el login (aceptable en red interna; endurecer si se expone).

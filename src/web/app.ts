@@ -22,6 +22,8 @@ export function createApp(deps: AppDeps): express.Express {
   app.use('/api', createAuthRouter(deps.userStore));
   app.use('/api/jobs', createJobsRouter(deps.jobStore, deps.downloadsDir));
 
+  app.use('/api', (_req, res) => res.status(404).json({ error: 'Ruta de API no encontrada' }));
+
   // Servir la UI compilada (si existe) con fallback SPA
   if (deps.uiDistDir && fs.existsSync(deps.uiDistDir)) {
     app.use(express.static(deps.uiDistDir));

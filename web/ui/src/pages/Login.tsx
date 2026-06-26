@@ -31,12 +31,12 @@ export default function Login() {
         <h2 style={{ marginTop: 0 }}>Iniciar sesión</h2>
         <form onSubmit={submit}>
           <div className="field">
-            <label>Usuario</label>
-            <input value={username} onChange={e => setUsername(e.target.value)} autoFocus />
+            <label htmlFor="login-username">Usuario</label>
+            <input id="login-username" value={username} onChange={e => setUsername(e.target.value)} autoFocus />
           </div>
           <div className="field">
-            <label>Contraseña</label>
-            <input type="password" value={password} onChange={e => setPassword(e.target.value)} />
+            <label htmlFor="login-password">Contraseña</label>
+            <input id="login-password" type="password" value={password} onChange={e => setPassword(e.target.value)} />
           </div>
           {error && <p className="error">{error}</p>}
           <button type="submit" disabled={busy || !username || !password}>
