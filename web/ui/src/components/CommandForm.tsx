@@ -27,7 +27,7 @@ export function defaultCommand(type: CommandType): UICommand {
     case 'UPDATE_LP_HOLDER': return { type, rawText: '', vin: '', holderName: '', updateTo: '', note: '' };
     case 'ADD_POLICY': return { type, rawText: '', policyType: 'AL', carrier: '', mga: '', policyNumber: '', effectiveDate: '', expirationDate: '' };
     case 'UPDATE_LIMIT_DEDUCTIBLE': return { type, rawText: '', policyType: 'AL' };
-    case 'CREATE_INSURED': return { type, rawText: '', name: '', dba: '', address: '', usdot: '', drivers: [], phone: '', email: '', secondaryEmail: '' };
+    case 'CREATE_INSURED': return { type, rawText: '', name: '', dba: undefined, address: '', usdot: '', drivers: [], phone: '', email: '', secondaryEmail: undefined };
   }
 }
 

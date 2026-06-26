@@ -105,7 +105,7 @@ export default function JobBuilder() {
         <div className="card" style={{ marginBottom: 12 }} key={i}>
           <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
             <strong>{COMMAND_LABELS[c.type]}</strong>
-            <button className="secondary" onClick={() => removeCmd(i)} disabled={commands.length === 1}>Quitar</button>
+            <button className="secondary" onClick={() => removeCmd(i)} disabled={commands.length === 1 || (mode === 'new_client' && c.type === 'CREATE_INSURED')}>Quitar</button>
           </div>
           <CommandForm value={c} instanceId={i} onChange={cmd => updateCmd(i, cmd)} />
         </div>

@@ -14,7 +14,7 @@ export function CreateInsuredFields({ instanceId, value, onChange }: { instanceI
     <>
       <div className="row">
         <div className="field" style={{ flex: 2 }}><label htmlFor={`cmd-${instanceId}-iname`}>Nombre del asegurado</label><input id={`cmd-${instanceId}-iname`} value={value.name} onChange={e => onChange({ name: e.target.value })} /></div>
-        <div className="field" style={{ flex: 1 }}><label htmlFor={`cmd-${instanceId}-idba`}>DBA (opcional)</label><input id={`cmd-${instanceId}-idba`} value={value.dba ?? ''} onChange={e => onChange({ dba: e.target.value })} /></div>
+        <div className="field" style={{ flex: 1 }}><label htmlFor={`cmd-${instanceId}-idba`}>DBA (opcional)</label><input id={`cmd-${instanceId}-idba`} value={value.dba ?? ''} onChange={e => onChange({ dba: e.target.value || undefined })} /></div>
       </div>
       <div className="field"><label htmlFor={`cmd-${instanceId}-iaddr`}>Dirección</label><input id={`cmd-${instanceId}-iaddr`} value={value.address} onChange={e => onChange({ address: e.target.value })} placeholder="123 Main St, Dallas, TX, 75201" /></div>
       <div className="row">
@@ -23,7 +23,7 @@ export function CreateInsuredFields({ instanceId, value, onChange }: { instanceI
       </div>
       <div className="row">
         <div className="field" style={{ flex: 1 }}><label htmlFor={`cmd-${instanceId}-iemail`}>Email</label><input id={`cmd-${instanceId}-iemail`} value={value.email} onChange={e => onChange({ email: e.target.value })} /></div>
-        <div className="field" style={{ flex: 1 }}><label htmlFor={`cmd-${instanceId}-iemail2`}>Email secundario (opcional)</label><input id={`cmd-${instanceId}-iemail2`} value={value.secondaryEmail ?? ''} onChange={e => onChange({ secondaryEmail: e.target.value })} /></div>
+        <div className="field" style={{ flex: 1 }}><label htmlFor={`cmd-${instanceId}-iemail2`}>Email secundario (opcional)</label><input id={`cmd-${instanceId}-iemail2`} value={value.secondaryEmail ?? ''} onChange={e => onChange({ secondaryEmail: e.target.value || undefined })} /></div>
       </div>
       <div className="field">
         <label>Drivers</label>
