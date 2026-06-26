@@ -50,5 +50,7 @@ describe('auth', () => {
     await agent.post('/api/logout');
     const me = await agent.get('/api/me');
     expect(me.status).toBe(401);
+    const prot = await agent.get('/api/protected');
+    expect(prot.status).toBe(401);
   });
 });

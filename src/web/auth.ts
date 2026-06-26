@@ -16,6 +16,8 @@ export function sessionMiddleware(secret: string): RequestHandler {
     cookie: {
       httpOnly: true,
       sameSite: 'lax',
+      // secure detrás de TLS en prod; requiere app.set('trust proxy', 1) si hay reverse proxy
+      secure: process.env.NODE_ENV === 'production',
       maxAge: 1000 * 60 * 60 * 8, // 8h
     },
   });
@@ -38,12 +40,18 @@ export function createAuthRouter(users: UserStore): Router {
     ) {
       return res.status(401).json({ error: 'Credenciales inválidas' });
     }
-    req.session.user = username;
-    res.json({ user: username });
+    req.session.regenerate(err => {
+      if (err) return res.status(500).json({ error: 'Error de sesión' });
+      req.session.user = username;
+      res.json({ user: username });
+    });
   });
 
   router.post('/logout', (req, res) => {
-    req.session.destroy(() => res.json({ ok: true }));
+    req.session.destroy(err => {
+      if (err) return res.status(500).json({ error: 'No se pudo cerrar sesión' });
+      res.json({ ok: true });
+    });
   });
 
   router.get('/me', (req, res) => {
