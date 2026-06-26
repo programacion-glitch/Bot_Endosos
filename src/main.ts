@@ -108,11 +108,23 @@ async function main(): Promise<void> {
   // Worker unificado: un solo job a la vez (cola primero, luego IMAP).
   while (true) {
     try {
-      // 1. Drenar la cola del portal
+      // 1. Drenar la cola del portal (un job a la vez)
       let didQueueJob = false;
-      while (await processOneQueuedJob(store)) {
-        didQueueJob = true;
-        await closeBrowserSafe();
+      let draining = true;
+      while (draining) {
+        try {
+          const processed = await processOneQueuedJob(store);
+          if (!processed) {
+            draining = false; // cola vacía: nada que cerrar
+          } else {
+            didQueueJob = true;
+            await closeBrowserSafe(); // cerrar tras cada job procesado
+          }
+        } catch (err) {
+          logger.error(`Error inesperado procesando la cola: ${(err as Error).message}`);
+          await closeBrowserSafe(); // se reclamó un job y el navegador puede haber quedado abierto
+          draining = false; // evita hot-loop si el store falla de forma persistente; reintenta el próximo ciclo
+        }
       }
 
       // 2. Procesar correos IMAP (respaldo)
