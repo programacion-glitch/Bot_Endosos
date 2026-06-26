@@ -1,5 +1,6 @@
 import { CommandType, PolicyType, UICommand, UIDriver, UIHolder } from '../types';
 import { HolderFields, PolicyPicker } from './HolderFields';
+import { PolicyFields } from './PolicyFields';
 
 const emptyHolder = (): UIHolder => ({ name: '', address: '', note: '' });
 
@@ -193,6 +194,25 @@ export default function CommandForm({ value, onChange, instanceId = 0 }:
           <div className="field"><label htmlFor={`cmd-${instanceId}-unote`}>Nota (opcional)</label><textarea id={`cmd-${instanceId}-unote`} value={value.note ?? ''} onChange={e => set({ note: e.target.value })} rows={2} /></div>
         </>
       );
+
+    case 'ADD_POLICY':
+      return (
+        <>
+          <div className="row">
+            <div className="field" style={{ flex: 1 }}><label htmlFor={`cmd-${instanceId}-carrier`}>Carrier</label><input id={`cmd-${instanceId}-carrier`} value={value.carrier} onChange={e => set({ carrier: e.target.value })} /></div>
+            <div className="field" style={{ flex: 1 }}><label htmlFor={`cmd-${instanceId}-mga`}>MGA</label><input id={`cmd-${instanceId}-mga`} value={value.mga} onChange={e => set({ mga: e.target.value })} /></div>
+          </div>
+          <div className="row">
+            <div className="field" style={{ flex: 1 }}><label htmlFor={`cmd-${instanceId}-pnum`}>Número de póliza</label><input id={`cmd-${instanceId}-pnum`} value={value.policyNumber} onChange={e => set({ policyNumber: e.target.value })} /></div>
+            <div className="field" style={{ flex: 1 }}><label htmlFor={`cmd-${instanceId}-eff`}>Effective</label><input id={`cmd-${instanceId}-eff`} value={value.effectiveDate} onChange={e => set({ effectiveDate: e.target.value })} placeholder="03/05/2026" /></div>
+            <div className="field" style={{ flex: 1 }}><label htmlFor={`cmd-${instanceId}-exp`}>Expiration</label><input id={`cmd-${instanceId}-exp`} value={value.expirationDate} onChange={e => set({ expirationDate: e.target.value })} placeholder="03/05/2027" /></div>
+          </div>
+          <PolicyFields instanceId={instanceId} showAutos value={value} onChange={patch => set(patch as Partial<UICommand>)} />
+        </>
+      );
+
+    case 'UPDATE_LIMIT_DEDUCTIBLE':
+      return <PolicyFields instanceId={instanceId} showAutos={false} value={value} onChange={patch => set(patch as Partial<UICommand>)} />;
 
     default:
       return null;

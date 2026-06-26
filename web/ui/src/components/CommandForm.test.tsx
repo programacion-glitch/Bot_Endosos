@@ -47,4 +47,17 @@ describe('CommandForm', () => {
     fireEvent.click(screen.getByLabelText('AL'));
     expect(onChange.mock.calls.at(-1)![0].policies).toContain('AL');
   });
+
+  it('ADD_POLICY AL muestra checkboxes de autos y togglea Scheduled Autos', () => {
+    const onChange = vi.fn();
+    render(<CommandForm value={defaultCommand('ADD_POLICY')} onChange={onChange} />);
+    fireEvent.click(screen.getByLabelText(/Scheduled Autos/i));
+    expect(onChange.mock.calls.at(-1)![0]).toMatchObject({ type: 'ADD_POLICY', scheduledAutos: true });
+  });
+
+  it('ADD_POLICY GL no muestra Scheduled Autos', () => {
+    const gl = { ...defaultCommand('ADD_POLICY'), policyType: 'GL' as const };
+    render(<CommandForm value={gl} onChange={() => {}} />);
+    expect(screen.queryByLabelText(/Scheduled Autos/i)).toBeNull();
+  });
 });
