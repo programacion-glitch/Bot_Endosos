@@ -1,4 +1,6 @@
+import { useRef } from 'react';
 import { CommandType, PolicyType, UICommand, UIDriver, UIHolder } from '../types';
+import { HolderFields, PolicyPicker } from './HolderFields';
 
 const emptyHolder = (): UIHolder => ({ name: '', address: '', note: '' });
 
@@ -44,7 +46,16 @@ export const COMMAND_LABELS: Record<CommandType, string> = {
 
 export default function CommandForm({ value, onChange, instanceId = 0 }:
   { value: UICommand; onChange: (c: UICommand) => void; instanceId?: number }) {
-  const set = (patch: Partial<UICommand>) => onChange({ ...value, ...patch } as UICommand);
+  // Synced ref so that consecutive fireEvent calls in tests (and rapid real interactions)
+  // both appear in the last onChange — ref.current is reset to the prop value on each render
+  // but mutated locally between renders so accumulated patches carry over.
+  const ref = useRef(value);
+  ref.current = value;
+  const set = (patch: Partial<UICommand>) => {
+    const next = { ...ref.current, ...patch } as UICommand;
+    ref.current = next;
+    onChange(next);
+  };
 
   switch (value.type) {
     case 'NO_CHANGE':
@@ -157,6 +168,40 @@ export default function CommandForm({ value, onChange, instanceId = 0 }:
             <input id={`cmd-${instanceId}-num`} value={value.newPolicyNumber} onChange={e => set({ newPolicyNumber: e.target.value })} />
           </div>
         </div>
+      );
+
+    case 'ADD_ADDITIONAL_INSURED':
+    case 'ADD_WAIVER_SUBROGATION':
+    case 'ADD_AI_AND_WOS':
+      return (
+        <>
+          <PolicyPicker instanceId={instanceId} value={value.policies} onChange={p => set({ policies: p } as Partial<UICommand>)} />
+          <HolderFields instanceId={instanceId} value={value.holder} onChange={h => set({ holder: h } as Partial<UICommand>)} />
+        </>
+      );
+
+    case 'ADD_NOTE_TO_HOLDER':
+      return <HolderFields instanceId={instanceId} value={value.holder} onChange={h => set({ holder: h } as Partial<UICommand>)} />;
+
+    case 'ADD_LOSS_PAYEE':
+      return (
+        <>
+          <div className="field"><label htmlFor={`cmd-${instanceId}-lpvin`}>VIN</label><input id={`cmd-${instanceId}-lpvin`} value={value.vin} onChange={e => set({ vin: e.target.value })} /></div>
+          <HolderFields instanceId={instanceId} value={value.holder} onChange={h => set({ holder: h } as Partial<UICommand>)} />
+        </>
+      );
+
+    case 'UPDATE_HOLDER':
+    case 'UPDATE_LP_HOLDER':
+      return (
+        <>
+          {value.type === 'UPDATE_LP_HOLDER' && (
+            <div className="field"><label htmlFor={`cmd-${instanceId}-uvin`}>VIN</label><input id={`cmd-${instanceId}-uvin`} value={value.vin} onChange={e => set({ vin: e.target.value })} /></div>
+          )}
+          <div className="field"><label htmlFor={`cmd-${instanceId}-uhn`}>Holder actual</label><input id={`cmd-${instanceId}-uhn`} value={value.holderName} onChange={e => set({ holderName: e.target.value })} /></div>
+          <div className="field"><label htmlFor={`cmd-${instanceId}-uto`}>Actualizar a (nuevo nombre o dirección)</label><input id={`cmd-${instanceId}-uto`} value={value.updateTo} onChange={e => set({ updateTo: e.target.value })} /></div>
+          <div className="field"><label htmlFor={`cmd-${instanceId}-unote`}>Nota (opcional)</label><textarea id={`cmd-${instanceId}-unote`} value={value.note ?? ''} onChange={e => set({ note: e.target.value })} rows={2} /></div>
+        </>
       );
 
     default:
