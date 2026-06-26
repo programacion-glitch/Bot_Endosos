@@ -51,6 +51,12 @@ export const jobInputSchema = z.object({
   createdBy: z.string().min(1, 'createdBy requerido'),
 });
 
+// Guard: si jobInputSchema deja de ser asignable a JobInput, esto falla en compilación.
+type _SchemaAssignableToJobInput =
+  z.infer<typeof jobInputSchema> extends JobInput ? true : never;
+const _schemaMatchesJobInput: _SchemaAssignableToJobInput = true;
+void _schemaMatchesJobInput;
+
 export function validateJobInput(
   data: unknown
 ): { ok: true; value: JobInput } | { ok: false; errors: string[] } {
