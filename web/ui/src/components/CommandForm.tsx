@@ -217,5 +217,10 @@ export default function CommandForm({ value, onChange, instanceId = 0 }:
 
     case 'CREATE_INSURED':
       return <CreateInsuredFields instanceId={instanceId} value={value} onChange={patch => set(patch as Partial<UICommand>)} />;
+
+    default: {
+      const _exhaustive: never = value;
+      return _exhaustive;
+    }
   }
 }
