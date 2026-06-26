@@ -45,4 +45,24 @@ describe('validateJobInput', () => {
     });
     expect(res.ok).toBe(false);
   });
+
+  it('acepta REMOVE_VEHICLE válido', () => {
+    const res = validateJobInput({ ...baseJob, commands: [{ type: 'REMOVE_VEHICLE', rawText: '', vin: 'V1', year: '2007', description: 'VOLVO', effectiveDate: '03/05/2026' }] });
+    expect(res.ok).toBe(true);
+  });
+
+  it('acepta CREATE_MASTER y UPDATE_MAILING_ADDRESS', () => {
+    const res = validateJobInput({ ...baseJob, commands: [{ type: 'CREATE_MASTER', rawText: '' }, { type: 'UPDATE_MAILING_ADDRESS', rawText: '', address: '123 Main' }] });
+    expect(res.ok).toBe(true);
+  });
+
+  it('rechaza UPDATE_POLICY_NUMBER con policyType inválido', () => {
+    const res = validateJobInput({ ...baseJob, commands: [{ type: 'UPDATE_POLICY_NUMBER', rawText: '', policyType: 'ZZ', newPolicyNumber: 'X-1' }] });
+    expect(res.ok).toBe(false);
+  });
+
+  it('acepta REMOVE_DRIVER (dob opcional)', () => {
+    const res = validateJobInput({ ...baseJob, commands: [{ type: 'REMOVE_DRIVER', rawText: '', driver: { firstName: 'Juan', lastName: 'Perez', cdl: 'TX1', cdlState: 'TX' } }] });
+    expect(res.ok).toBe(true);
+  });
 });

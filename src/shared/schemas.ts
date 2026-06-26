@@ -3,6 +3,22 @@ import { JobInput } from './jobTypes';
 
 const rawText = z.string().default('');
 
+export const policyTypeSchema = z.enum(['AL', 'MTC', 'APD', 'GL', 'WC', 'EXL', 'NTL']);
+
+export const driverSchema = z.object({
+  firstName: z.string().min(1, 'Nombre requerido'),
+  lastName: z.string().min(1, 'Apellido requerido'),
+  cdl: z.string().min(1, 'CDL requerido'),
+  cdlState: z.string().min(1, 'Estado del CDL requerido'),
+  dob: z.string().min(1, 'DOB requerido'),
+});
+
+export const holderSchema = z.object({
+  name: z.string().min(1, 'Nombre del holder requerido'),
+  address: z.string().min(1, 'Dirección del holder requerida'),
+  note: z.string().optional(),
+});
+
 export const noChangeSchema = z.object({
   type: z.literal('NO_CHANGE'),
   rawText,
@@ -32,11 +48,43 @@ export const deleteVehicleValueSchema = z.object({
   vin: z.string().min(1, 'VIN requerido'),
 });
 
+export const createMasterSchema = z.object({ type: z.literal('CREATE_MASTER'), rawText });
+
+export const removeVehicleSchema = z.object({
+  type: z.literal('REMOVE_VEHICLE'), rawText,
+  vin: z.string().min(1, 'VIN requerido'),
+  year: z.string().min(1, 'Año requerido'),
+  description: z.string().min(1, 'Descripción requerida'),
+  value: z.string().optional(),
+  effectiveDate: z.string().min(1, 'Effective Date requerida'),
+});
+
+export const removeDriverSchema = z.object({
+  type: z.literal('REMOVE_DRIVER'), rawText,
+  driver: z.object({
+    firstName: z.string().min(1), lastName: z.string().min(1),
+    cdl: z.string().min(1), cdlState: z.string().min(1),
+    dob: z.string().optional().default(''), // DOB opcional al remover
+  }),
+});
+
+export const removeHolderSchema = z.object({ type: z.literal('REMOVE_HOLDER'), rawText, holderName: z.string().min(1, 'Holder requerido') });
+export const addNoteToMasterSchema = z.object({ type: z.literal('ADD_NOTE_TO_MASTER'), rawText, note: z.string().min(1, 'Nota requerida') });
+export const updateMailingAddressSchema = z.object({ type: z.literal('UPDATE_MAILING_ADDRESS'), rawText, address: z.string().min(1, 'Dirección requerida') });
+export const updatePolicyNumberSchema = z.object({ type: z.literal('UPDATE_POLICY_NUMBER'), rawText, policyType: policyTypeSchema, newPolicyNumber: z.string().min(1, 'Nuevo número requerido') });
+
 export const commandSchema = z.discriminatedUnion('type', [
   noChangeSchema,
   addVehicleSchema,
   updateVehicleValueSchema,
   deleteVehicleValueSchema,
+  createMasterSchema,
+  removeVehicleSchema,
+  removeDriverSchema,
+  removeHolderSchema,
+  addNoteToMasterSchema,
+  updateMailingAddressSchema,
+  updatePolicyNumberSchema,
 ]);
 
 // Fase 1: solo modo existing_client (endosos). new_client + CREATE_INSURED en fase posterior.
