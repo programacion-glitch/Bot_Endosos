@@ -2,6 +2,7 @@ import { Routes, Route, Navigate, Link, useNavigate } from 'react-router-dom';
 import { AuthProvider, RequireAuth, useAuth } from './auth';
 import { api } from './api';
 import Login from './pages/Login';
+import JobBuilder from './pages/JobBuilder';
 
 function Header() {
   const { user, setUser } = useAuth();
@@ -32,7 +33,7 @@ export default function App() {
       <Header />
       <Routes>
         <Route path="/login" element={<Login />} />
-        <Route path="/" element={<RequireAuth><Placeholder title="Builder (Task 10)" /></RequireAuth>} />
+        <Route path="/" element={<RequireAuth><JobBuilder /></RequireAuth>} />
         <Route path="/jobs" element={<RequireAuth><Placeholder title="Historial (Task 11)" /></RequireAuth>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
