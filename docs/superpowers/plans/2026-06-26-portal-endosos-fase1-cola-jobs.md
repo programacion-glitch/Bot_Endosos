@@ -55,10 +55,10 @@
 
 Run:
 ```bash
-npm install better-sqlite3@^11.8.1 zod@^3.24.1
+npm install better-sqlite3@^12.11.1 zod@^3.24.1
 npm install -D vitest@^2.1.8 @types/better-sqlite3@^7.6.12
 ```
-Expected: `package.json` y `package-lock.json` actualizados sin errores. `better-sqlite3` baja binarios precompilados para Node 20.
+Expected: `package.json` y `package-lock.json` actualizados sin errores. `better-sqlite3@12.x` baja binarios precompilados para Node 24 (máquina de desarrollo) y Node 20 (Docker) en Windows/Linux x64 — verificado que instala sin build tools de C++.
 
 - [ ] **Step 2: Añadir el script de test**
 
