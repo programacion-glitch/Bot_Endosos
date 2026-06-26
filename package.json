@@ -7,25 +7,34 @@
     "start": "node dist/main.js",
     "dev": "ts-node-dev --respawn --transpile-only src/main.ts",
     "build": "tsc",
-    "lint": "eslint src/**/*.ts"
+    "lint": "eslint src/**/*.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@playwright/test": "1.58.2",
+    "better-sqlite3": "^12.11.1",
     "dotenv": "^16.4.1",
     "exceljs": "^4.4.0",
     "imap-simple": "^5.1.0",
     "mailparser": "^3.7.1",
     "nodemailer": "^6.9.9",
     "playwright": "1.58.2",
-    "winston": "^3.11.0"
+    "winston": "^3.11.0",
+    "zod": "^3.25.76"
+  },
+  "overrides": {
+    "rollup": "npm:@rollup/wasm-node@4.62.2"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/imap-simple": "^4.2.3",
     "@types/mailparser": "^3.4.4",
-    "@types/nodemailer": "^6.4.14",
     "@types/node": "^20.11.5",
+    "@types/nodemailer": "^6.4.14",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "vitest": "^2.1.9"
   }
 }
