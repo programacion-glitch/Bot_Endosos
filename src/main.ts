@@ -1,17 +1,17 @@
 import 'dotenv/config';
-import { startPolling, markAsSeen, moveToFolder, ensureMailbox, closeImap, RawEmail } from './email/imapClient';
+import { fetchUnseenEmails, markAsSeen, moveToFolder, ensureMailbox, closeImap, RawEmail } from './email/imapClient';
 import { parseEmail } from './email/emailParser';
-import { dispatchCommands } from './actions/dispatcher';
-import { getNowCertsPage, navigateToClient, invalidateSession } from './browser/nowcertsLogin';
-import { closeBrowser, screenshot } from './browser/browserManager';
-import { sendReviewEmail, sendClientApprovalEmail, sendAlertEmail, sendErrorNotification } from './email/emailSender';
-import { findAgentEmails } from './utils/agentLookup';
-import { logger, logEmailProcessing } from './utils/logger';
-import { ActionResult, Command } from './types';
+import { closeBrowser } from './browser/browserManager';
+import { invalidateSession } from './browser/nowcertsLogin';
+import { processJob } from './job/processJob';
+import { openJobStore } from './job/jobStore';
+import { processOneQueuedJob } from './job/queueSource';
+import { config } from './config/config';
+import { sleep } from './utils/retry';
+import { logger } from './utils/logger';
+import { Command } from './types';
 
 const PROCESSED_FOLDER = 'H2O-Endosos';
-
-// ─── Subject prefix validation ───────────────────────────────────────────────
 
 type SubjectPrefix = 'BOT-END' | 'BOT-DOCUMENTAR';
 
@@ -22,34 +22,22 @@ function getSubjectPrefix(subject: string): SubjectPrefix | null {
   return null;
 }
 
-function validateCoherence(
-  prefix: SubjectPrefix,
-  commands: Command[],
-): { valid: boolean; reason?: string } {
+function validateCoherence(prefix: SubjectPrefix, commands: Command[]): { valid: boolean; reason?: string } {
   const hasCreateInsured = commands.some(c => c.type === 'CREATE_INSURED');
-
   if (prefix === 'BOT-DOCUMENTAR' && !hasCreateInsured) {
-    return {
-      valid: false,
-      reason: 'Subject says BOT-DOCUMENTAR but no CREATE_INSURED command found in body',
-    };
+    return { valid: false, reason: 'Subject says BOT-DOCUMENTAR but no CREATE_INSURED command found in body' };
   }
-
   if (prefix === 'BOT-END' && hasCreateInsured) {
-    return {
-      valid: false,
-      reason: 'Subject says BOT-END (existing client) but body contains CREATE_INSURED command',
-    };
+    return { valid: false, reason: 'Subject says BOT-END (existing client) but body contains CREATE_INSURED command' };
   }
-
   return { valid: true };
 }
 
+/** Procesa un correo IMAP: valida, ejecuta vía processJob y hace bookkeeping IMAP. */
 async function processEmail(raw: RawEmail): Promise<void> {
-  // Validate subject prefix
   const prefix = getSubjectPrefix(raw.subject);
   if (!prefix) {
-    logger.warn(`Email subject doesn't match valid prefixes (BOT-END / DOCUMENTAR CLIENTE): "${raw.subject}" — skipping.`);
+    logger.warn(`Email subject doesn't match valid prefixes: "${raw.subject}" — skipping.`);
     await markAsSeen(raw.uid);
     return;
   }
@@ -62,7 +50,6 @@ async function processEmail(raw: RawEmail): Promise<void> {
     return;
   }
 
-  // Validate coherence between subject prefix and commands
   const coherence = validateCoherence(prefix, email.commands);
   if (!coherence.valid) {
     logger.warn(`Coherence validation failed for "${email.subject}": ${coherence.reason} — skipping.`);
@@ -70,148 +57,45 @@ async function processEmail(raw: RawEmail): Promise<void> {
     return;
   }
 
-  logEmailProcessing(email.subject, email.commands.length);
+  const outcome = await processJob(email);
 
-  // Open the browser and log in to NowCerts (with retry if it fails mid-startup).
-  // Each email gets a fresh browser/session so nothing stays open between emails.
-  let page;
-  try {
-    page = await getNowCertsPage();
-  } catch (err) {
-    const msg = (err as Error).message;
-    logger.error(`Failed to open NowCerts browser for email "${email.subject}": ${msg}`);
-    // Force-reset state and retry once
-    invalidateSession();
-    try {
-      await closeBrowser();
-    } catch {
-      // ignore
-    }
-    try {
-      page = await getNowCertsPage();
-    } catch (err2) {
-      const msg2 = (err2 as Error).message;
-      logger.error(`Second browser-open attempt also failed: ${msg2}`);
-      await sendErrorNotification({
-        emailSubject: email.subject,
-        errorMessage: `Could not open NowCerts browser after 2 attempts.\n\nFirst error: ${msg}\nSecond error: ${msg2}`,
-        clientName: email.clientName,
-        usdot: email.usdot,
-      });
-      await markAsSeen(raw.uid);
-      return;
-    }
-  }
-
-  // Navigate to client profile (if it's not a Create Insured command)
-  const isCreateInsured = email.commands.some(c => c.type === 'CREATE_INSURED');
-
-  if (!isCreateInsured && email.clientName) {
-    const found = await navigateToClient(page, email.clientName, email.usdot);
-    if (!found) {
-      const alertMsg = `Client not found in NowCerts: "${email.clientName}" (USDOT: ${email.usdot ?? 'N/A'})`;
-      logger.error(alertMsg);
-      await sendAlertEmail({
-        to: email.from,
-        subject: `[ERROR] Client not found: ${email.clientName}`,
-        body: alertMsg,
-      });
-      await markAsSeen(raw.uid);
-      return;
-    }
-  }
-
-  // Execute all commands
-  let results: ActionResult[];
-  try {
-    results = await dispatchCommands(page, email);
-  } catch (err) {
-    logger.error(`Fatal error during command dispatch: ${(err as Error).message}`);
-    await sendErrorNotification({
-      emailSubject: email.subject,
-      errorMessage: `Fatal error: ${(err as Error).message}\n\n${(err as Error).stack ?? ''}`,
-      clientName: email.clientName,
-      usdot: email.usdot,
-    });
-    invalidateSession();
-    await markAsSeen(raw.uid);
-    return;
-  }
-
-  // Collect downloaded files and error screenshots from all commands
-  const allFiles = results.flatMap(r => r.downloadedFiles ?? []);
-  const errorScreenshots = results.map(r => r.errorScreenshot).filter((s): s is string => !!s);
-  const failures = results.filter(r => !r.success);
-  const successes = results.filter(r => r.success);
-
-  // Build changes description for email
-  const changesDescription = buildChangesDescription(results);
-
-  // Always send review email with results summary (downloads + error screenshots)
-  try {
-    await sendReviewEmail({
-      clientName: email.clientName ?? 'Unknown',
-      usdot: email.usdot ?? '',
-      changesDescription,
-      attachments: [...allFiles, ...errorScreenshots],
-    });
-  } catch (err) {
-    logger.error(`Failed to send review email: ${(err as Error).message}`);
-  }
-
-  // Move to processed folder if all commands succeeded, otherwise just mark as seen
-  if (failures.length === 0) {
+  if (outcome.allSucceeded) {
     await moveToFolder(raw.uid, PROCESSED_FOLDER);
   } else {
     await markAsSeen(raw.uid);
   }
-
-  logger.info(
-    `Email processed: ${successes.length} ok, ${failures.length} failed. ` +
-    `Subject: "${email.subject}"`
-  );
-
-  if (failures.length > 0) {
-    const failSummary = failures.map(f => `${f.commandType}: ${f.message}`).join('\n');
-    logger.error(`Failures:\n${failSummary}`);
-    await sendErrorNotification({
-      emailSubject: email.subject,
-      errorMessage: `${failures.length} command(s) failed:\n\n${failSummary}`,
-      clientName: email.clientName,
-      usdot: email.usdot,
-      screenshots: errorScreenshots,
-    });
-  }
+  logger.info(`Email processed (success=${outcome.allSucceeded}). Subject: "${email.subject}"`);
 }
 
-function buildChangesDescription(results: ActionResult[]): string {
-  return results
-    .map(r => {
-      const status = r.success ? '✓' : '✗';
-      return `${status} ${r.commandType}: ${r.message}`;
-    })
-    .join('\n');
+/** Cierra el navegador entre jobs para no dejar sesiones abiertas. */
+async function closeBrowserSafe(): Promise<void> {
+  try {
+    await closeBrowser();
+    invalidateSession();
+    logger.info('Browser closed after job.');
+  } catch (err) {
+    logger.warn(`Could not close browser cleanly: ${(err as Error).message}`);
+  }
 }
 
 async function main(): Promise<void> {
   logger.info('=== H2O Bot starting ===');
 
-  // Graceful shutdown
-  process.on('SIGINT', async () => {
+  const store = openJobStore(config.jobs.dbPath);
+  // Jobs que quedaron 'processing' por un reinicio: marcarlos para revisión (no se reintentan solos).
+  const stuck = store.markStuckProcessingAsNeedsReview();
+  if (stuck > 0) logger.warn(`${stuck} job(s) quedaron en 'processing' tras un reinicio — marcados como 'needs_review'.`);
+
+  const shutdown = async () => {
     logger.info('Shutting down...');
     await closeImap();
     await closeBrowser();
+    store.close();
     process.exit(0);
-  });
+  };
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
 
-  process.on('SIGTERM', async () => {
-    logger.info('SIGTERM received, shutting down...');
-    await closeImap();
-    await closeBrowser();
-    process.exit(0);
-  });
-
-  // Ensure the processed-emails folder exists in Gmail
   try {
     await ensureMailbox(PROCESSED_FOLDER);
     logger.info(`Mailbox "${PROCESSED_FOLDER}" ready.`);
@@ -219,27 +103,42 @@ async function main(): Promise<void> {
     logger.warn(`Could not verify mailbox "${PROCESSED_FOLDER}": ${(err as Error).message}`);
   }
 
-  logger.info('Bot ready. Browser will launch on-demand when an email arrives.');
+  logger.info('Bot ready. Worker único: drena la cola y luego IMAP, un job a la vez.');
 
-  // Start IMAP polling loop — browser is only launched when an email arrives.
-  await startPolling(async (emails: RawEmail[]) => {
-    for (const email of emails) {
-      try {
-        await processEmail(email);
-      } catch (err) {
-        logger.error(`Unhandled error processing email "${email.subject}": ${(err as Error).message}`);
-      } finally {
-        // Close the browser after processing each email so we don't keep idle sessions open.
+  // Worker unificado: un solo job a la vez (cola primero, luego IMAP).
+  while (true) {
+    try {
+      // 1. Drenar la cola del portal
+      let didQueueJob = false;
+      while (await processOneQueuedJob(store)) {
+        didQueueJob = true;
+        await closeBrowserSafe();
+      }
+
+      // 2. Procesar correos IMAP (respaldo)
+      const emails = await fetchUnseenEmails().catch(err => {
+        logger.error(`IMAP fetch error: ${(err as Error).message}`);
+        return [] as RawEmail[];
+      });
+      for (const email of emails) {
         try {
-          await closeBrowser();
-          invalidateSession();
-          logger.info('Browser closed after email processing.');
+          await processEmail(email);
         } catch (err) {
-          logger.warn(`Could not close browser cleanly: ${(err as Error).message}`);
+          logger.error(`Unhandled error processing email "${email.subject}": ${(err as Error).message}`);
+        } finally {
+          await closeBrowserSafe();
         }
       }
+
+      // 3. Esperar antes del siguiente ciclo solo si no hubo trabajo de cola
+      if (!didQueueJob) {
+        await sleep(config.queue.pollIntervalMs);
+      }
+    } catch (err) {
+      logger.error(`Worker loop error: ${(err as Error).message}`);
+      await sleep(config.queue.pollIntervalMs);
     }
-  });
+  }
 }
 
 main().catch(err => {
