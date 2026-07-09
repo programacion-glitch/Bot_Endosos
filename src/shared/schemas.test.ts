@@ -66,6 +66,16 @@ describe('validateJobInput', () => {
     expect(res.ok).toBe(true);
   });
 
+  it('acepta ADD_DRIVER con driver completo (dob requerido)', () => {
+    const res = validateJobInput({ ...baseJob, commands: [{ type: 'ADD_DRIVER', rawText: '', driver: { firstName: 'Juan', lastName: 'Perez', cdl: 'TX123', cdlState: 'TX', dob: '01/15/1990' } }] });
+    expect(res.ok).toBe(true);
+  });
+
+  it('rechaza ADD_DRIVER sin dob', () => {
+    const res = validateJobInput({ ...baseJob, commands: [{ type: 'ADD_DRIVER', rawText: '', driver: { firstName: 'Juan', lastName: 'Perez', cdl: 'TX123', cdlState: 'TX' } }] });
+    expect(res.ok).toBe(false);
+  });
+
   // ── Grupo holder / loss-payee (Fase 3 – Task 2) ───────────────────────────
 
   const holder = { name: 'Holder LLC', address: '500 Market St, Houston, TX, 77002', note: 'As per contract' };

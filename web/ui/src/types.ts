@@ -2,7 +2,7 @@ export type PolicyType = 'AL' | 'MTC' | 'APD' | 'GL' | 'WC' | 'EXL' | 'NTL';
 
 export type CommandType =
   | 'NO_CHANGE' | 'ADD_VEHICLE' | 'UPDATE_VEHICLE_VALUE' | 'DELETE_VEHICLE_VALUE'
-  | 'CREATE_MASTER' | 'REMOVE_VEHICLE' | 'REMOVE_DRIVER' | 'REMOVE_HOLDER'
+  | 'CREATE_MASTER' | 'REMOVE_VEHICLE' | 'ADD_DRIVER' | 'REMOVE_DRIVER' | 'REMOVE_HOLDER'
   | 'ADD_NOTE_TO_MASTER' | 'UPDATE_MAILING_ADDRESS' | 'UPDATE_POLICY_NUMBER'
   | 'ADD_ADDITIONAL_INSURED' | 'ADD_WAIVER_SUBROGATION' | 'ADD_AI_AND_WOS'
   | 'ADD_NOTE_TO_HOLDER' | 'ADD_LOSS_PAYEE' | 'UPDATE_HOLDER' | 'UPDATE_LP_HOLDER'
@@ -18,6 +18,7 @@ export type UICommand =
   | { type: 'REMOVE_VEHICLE'; rawText: string; vin: string; year: string; description: string; value?: string; effectiveDate: string }
   | { type: 'UPDATE_VEHICLE_VALUE'; rawText: string; vin: string; value: string }
   | { type: 'DELETE_VEHICLE_VALUE'; rawText: string; vin: string }
+  | { type: 'ADD_DRIVER'; rawText: string; driver: UIDriver }
   | { type: 'REMOVE_DRIVER'; rawText: string; driver: UIDriver }
   | { type: 'REMOVE_HOLDER'; rawText: string; holderName: string }
   | { type: 'ADD_NOTE_TO_MASTER'; rawText: string; note: string }

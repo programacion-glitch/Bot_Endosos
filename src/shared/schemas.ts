@@ -59,6 +59,11 @@ export const removeVehicleSchema = z.object({
   effectiveDate: z.string().min(1, 'Effective Date requerida'),
 });
 
+export const addDriverSchema = z.object({
+  type: z.literal('ADD_DRIVER'), rawText,
+  driver: driverSchema, // dob requerido: el datepicker de NowCerts lo necesita
+});
+
 export const removeDriverSchema = z.object({
   type: z.literal('REMOVE_DRIVER'), rawText,
   driver: z.object({
@@ -143,6 +148,7 @@ export const commandSchema = z.discriminatedUnion('type', [
   deleteVehicleValueSchema,
   createMasterSchema,
   removeVehicleSchema,
+  addDriverSchema,
   removeDriverSchema,
   removeHolderSchema,
   addNoteToMasterSchema,

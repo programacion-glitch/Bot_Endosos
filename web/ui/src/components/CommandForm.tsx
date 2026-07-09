@@ -13,6 +13,7 @@ export function defaultCommand(type: CommandType): UICommand {
     case 'REMOVE_VEHICLE': return { type, rawText: '', vin: '', year: '', description: '', value: '', effectiveDate: '' };
     case 'UPDATE_VEHICLE_VALUE': return { type, rawText: '', vin: '', value: '' };
     case 'DELETE_VEHICLE_VALUE': return { type, rawText: '', vin: '' };
+    case 'ADD_DRIVER': return { type, rawText: '', driver: { firstName: '', lastName: '', cdl: '', cdlState: '', dob: '' } };
     case 'REMOVE_DRIVER': return { type, rawText: '', driver: { firstName: '', lastName: '', cdl: '', cdlState: '', dob: '' } };
     case 'REMOVE_HOLDER': return { type, rawText: '', holderName: '' };
     case 'ADD_NOTE_TO_MASTER': return { type, rawText: '', note: '' };
@@ -35,7 +36,7 @@ export const COMMAND_LABELS: Record<CommandType, string> = {
   NO_CHANGE: 'Sin cambios (Recibido)', CREATE_MASTER: 'Crear Master',
   ADD_VEHICLE: 'Agregar vehículo', REMOVE_VEHICLE: 'Quitar vehículo',
   UPDATE_VEHICLE_VALUE: 'Actualizar valor de vehículo', DELETE_VEHICLE_VALUE: 'Borrar valor de vehículo',
-  REMOVE_DRIVER: 'Quitar driver', REMOVE_HOLDER: 'Quitar holder',
+  ADD_DRIVER: 'Agregar driver', REMOVE_DRIVER: 'Quitar driver', REMOVE_HOLDER: 'Quitar holder',
   ADD_NOTE_TO_MASTER: 'Nota al Master', UPDATE_MAILING_ADDRESS: 'Actualizar dirección',
   UPDATE_POLICY_NUMBER: 'Actualizar número de póliza',
   ADD_ADDITIONAL_INSURED: 'Additional Insured', ADD_WAIVER_SUBROGATION: 'Waiver of Subrogation',
@@ -109,6 +110,7 @@ export default function CommandForm({ value, onChange, instanceId = 0 }:
     case 'CREATE_MASTER':
       return <p style={{ color: 'var(--h2o-gray)', margin: 0 }}>Crea el certificado master del asegurado.</p>;
 
+    case 'ADD_DRIVER':
     case 'REMOVE_DRIVER': {
       const d = value.driver;
       const setD = (patch: Partial<UIDriver>) => set({ driver: { ...d, ...patch } } as Partial<UICommand>);
@@ -118,6 +120,9 @@ export default function CommandForm({ value, onChange, instanceId = 0 }:
           <div className="field" style={{ flex: 1 }}><label htmlFor={`cmd-${instanceId}-ln`}>Apellido</label><input id={`cmd-${instanceId}-ln`} value={d.lastName} onChange={e => setD({ lastName: e.target.value })} /></div>
           <div className="field" style={{ flex: 1 }}><label htmlFor={`cmd-${instanceId}-cdl`}>CDL</label><input id={`cmd-${instanceId}-cdl`} value={d.cdl} onChange={e => setD({ cdl: e.target.value })} /></div>
           <div className="field" style={{ flex: 1 }}><label htmlFor={`cmd-${instanceId}-cdls`}>Estado CDL</label><input id={`cmd-${instanceId}-cdls`} value={d.cdlState} onChange={e => setD({ cdlState: e.target.value })} /></div>
+          {value.type === 'ADD_DRIVER' && (
+            <div className="field" style={{ flex: 1 }}><label htmlFor={`cmd-${instanceId}-dob`}>DOB</label><input id={`cmd-${instanceId}-dob`} value={d.dob} onChange={e => setD({ dob: e.target.value })} placeholder="01/15/1990" /></div>
+          )}
         </div>
       );
     }

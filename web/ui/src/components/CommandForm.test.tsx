@@ -61,6 +61,20 @@ describe('CommandForm', () => {
     expect(screen.queryByLabelText(/Scheduled Autos/i)).toBeNull();
   });
 
+  it('ADD_DRIVER muestra campos de driver incluido DOB y emite cambios', () => {
+    const onChange = vi.fn();
+    render(<CommandForm value={defaultCommand('ADD_DRIVER')} onChange={onChange} />);
+    fireEvent.change(screen.getByLabelText(/^Nombre$/i), { target: { value: 'Juan' } });
+    expect(onChange.mock.calls.at(-1)![0].driver.firstName).toBe('Juan');
+    fireEvent.change(screen.getByLabelText(/DOB/i), { target: { value: '01/15/1990' } });
+    expect(onChange.mock.calls.at(-1)![0].driver.dob).toBe('01/15/1990');
+  });
+
+  it('REMOVE_DRIVER no muestra campo DOB', () => {
+    render(<CommandForm value={defaultCommand('REMOVE_DRIVER')} onChange={() => {}} />);
+    expect(screen.queryByLabelText(/DOB/i)).toBeNull();
+  });
+
   it('CREATE_INSURED agrega un driver', () => {
     const onChange = vi.fn();
     render(<CommandForm value={defaultCommand('CREATE_INSURED')} onChange={onChange} />);
