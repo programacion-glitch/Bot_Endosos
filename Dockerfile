@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.6
 
-# ---------- Builder: compila TypeScript y prepara node_modules ----------
+# ---------- Builder: compila TypeScript del backend ----------
 FROM mcr.microsoft.com/playwright:v1.58.2-jammy AS builder
 
 WORKDIR /app
@@ -23,7 +23,20 @@ RUN --mount=type=cache,target=/root/.npm \
     npm prune --omit=dev
 
 
-# ---------- Runtime: imagen mínima para ejecutar el bot ----------
+# ---------- UI builder: compila la SPA React (portal) ----------
+FROM mcr.microsoft.com/playwright:v1.58.2-jammy AS ui-builder
+
+WORKDIR /ui
+
+COPY web/ui/package.json web/ui/package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci
+
+COPY web/ui ./
+RUN npm run build
+
+
+# ---------- Runtime: imagen única para bot (CMD) y web (command en compose) ----------
 FROM mcr.microsoft.com/playwright:v1.58.2-jammy
 
 ENV TZ=America/Chicago \
@@ -34,10 +47,13 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 WORKDIR /app
 
-# Copiar artefactos del builder
+# Copiar artefactos de los builders
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
+COPY --from=ui-builder /ui/dist ./web/ui/dist
 COPY package.json ./
+# Solo agents.xlsx llega aquí (las DBs y el perfil quedan fuera por .dockerignore);
+# en el primer arranque Docker copia este contenido al volumen botdata vacío.
 COPY data ./data
 
 # Crear carpetas runtime (las sobrescriben los volúmenes de docker-compose)
