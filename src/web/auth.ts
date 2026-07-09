@@ -16,8 +16,9 @@ export function sessionMiddleware(secret: string): RequestHandler {
     cookie: {
       httpOnly: true,
       sameSite: 'lax',
-      // secure detrás de TLS en prod; requiere app.set('trust proxy', 1) si hay reverse proxy
-      secure: process.env.NODE_ENV === 'production',
+      // El portal es HTTP interno (LAN). Secure solo si algún día hay TLS delante:
+      // activar con WEB_COOKIE_SECURE=true (y app.set('trust proxy', 1) si hay proxy).
+      secure: process.env.WEB_COOKIE_SECURE === 'true',
       maxAge: 1000 * 60 * 60 * 8, // 8h
     },
   });

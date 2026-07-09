@@ -54,3 +54,36 @@ describe('auth', () => {
     expect(prot.status).toBe(401);
   });
 });
+
+describe('cookie Secure', () => {
+  it('login funciona sobre HTTP plano aun con NODE_ENV=production (cookie sin Secure)', async () => {
+    const prev = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    delete process.env.WEB_COOKIE_SECURE;
+    try {
+      const agent = request.agent(makeApp(users));
+      const login = await agent.post('/api/login').send({ username: 'maria', password: 'secreta123' });
+      expect(login.status).toBe(200);
+      const setCookie: string[] = login.headers['set-cookie'] ?? [];
+      expect(setCookie.length).toBeGreaterThan(0);
+      expect(setCookie.join(';')).not.toMatch(/;\s*secure/i);
+      const me = await agent.get('/api/me');
+      expect(me.status).toBe(200);
+    } finally {
+      process.env.NODE_ENV = prev;
+    }
+  });
+
+  it('WEB_COOKIE_SECURE=true activa el flag Secure (no se emite cookie sobre HTTP)', async () => {
+    process.env.WEB_COOKIE_SECURE = 'true';
+    try {
+      const res = await request(makeApp(users))
+        .post('/api/login')
+        .send({ username: 'maria', password: 'secreta123' });
+      // express-session con secure:true no emite Set-Cookie en conexiones no-TLS
+      expect(res.headers['set-cookie']).toBeUndefined();
+    } finally {
+      delete process.env.WEB_COOKIE_SECURE;
+    }
+  });
+});
