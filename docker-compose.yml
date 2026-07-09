@@ -1,18 +1,37 @@
 services:
-  bot-endosos:
+  web:
     build: .
-    container_name: bot-endosos
+    container_name: endosos-web
+    restart: unless-stopped
+    command: ["node", "dist/web/server.js"]
+    env_file:
+      - .env
+    ports:
+      - "80:80"
+    volumes:
+      # DBs SQLite (jobs/users) + agents.xlsx: volumen nombrado (WAL no es
+      # seguro en bind mounts de Windows compartidos entre contenedores)
+      - botdata:/app/data
+      # El bot genera archivos aquí y el portal los sirve para descarga
+      - ./downloads:/app/downloads
+      # Logs separados por servicio: winston rota bot.log y dos procesos
+      # rotando el mismo archivo se pisan
+      - ./logs/web:/app/logs
+
+  bot:
+    build: .
+    container_name: endosos-bot
     restart: unless-stopped
     env_file:
       - .env
     environment:
       - HEADLESS=true
-      - TZ=America/Chicago
     volumes:
-      # Persistir descargas y logs en el host
+      - botdata:/app/data
       - ./downloads:/app/downloads
-      - ./logs:/app/logs
-      # Permitir editar agents.xlsx sin rebuild
-      - ./data:/app/data
-    # Aumentar shm size para Chromium (evita crashes con páginas pesadas)
+      - ./logs/bot:/app/logs
+    # Chromium necesita /dev/shm amplio (evita crashes con páginas pesadas)
     shm_size: '2gb'
+
+volumes:
+  botdata:
