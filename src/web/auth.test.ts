@@ -64,7 +64,8 @@ describe('cookie Secure', () => {
       const agent = request.agent(makeApp(users));
       const login = await agent.post('/api/login').send({ username: 'maria', password: 'secreta123' });
       expect(login.status).toBe(200);
-      const setCookie: string[] = login.headers['set-cookie'] ?? [];
+      // supertest tipa headers como string; en runtime set-cookie es string[]
+      const setCookie: string[] = ([] as string[]).concat(login.headers['set-cookie'] ?? []);
       expect(setCookie.length).toBeGreaterThan(0);
       expect(setCookie.join(';')).not.toMatch(/;\s*secure/i);
       const me = await agent.get('/api/me');
