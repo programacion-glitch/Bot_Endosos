@@ -42,7 +42,13 @@ la actual), dos servicios en compose que solo difieren en el comando:
   SQLite, así que el bind mount es seguro y deja los archivos visibles en el host.
 - **`./logs` (bind mount)**: logs visibles en el host.
 
-## Cambios de código (2 archivos)
+## Cambios de código
+
+0. **`src/web/auth.ts`** (hallazgo post-diseño): la cookie de sesión usa
+   `secure: NODE_ENV === 'production'` y la imagen Docker define
+   `NODE_ENV=production` → cookie `Secure` sobre HTTP plano rompería el login
+   en el contenedor. Se cambia a `secure: WEB_COOKIE_SECURE === 'true'`
+   (default apagado; el portal es HTTP interno).
 
 1. **`Dockerfile`**: agregar etapa de build de la UI React
    (`COPY web/ui` → `npm ci` → `npm run build`) y copiar `web/ui/dist` al
