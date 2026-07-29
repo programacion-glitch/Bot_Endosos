@@ -1,23 +1,7 @@
+# El portal web vive en el repo Portal_H2O (servicio portal-h2o, puerto 80).
+# Este compose solo corre el bot; el volumen botdata lo comparte con el portal
+# (el portal lo monta como externo para encolar jobs en jobs.db).
 services:
-  web:
-    build: .
-    container_name: endosos-web
-    restart: unless-stopped
-    command: ["node", "dist/web/server.js"]
-    env_file:
-      - .env
-    ports:
-      - "80:80"
-    volumes:
-      # DBs SQLite (jobs/users) + agents.xlsx: volumen nombrado (WAL no es
-      # seguro en bind mounts de Windows compartidos entre contenedores)
-      - botdata:/app/data
-      # El bot genera archivos aquí y el portal los sirve para descarga
-      - ./downloads:/app/downloads
-      # Logs separados por servicio: winston rota bot.log y dos procesos
-      # rotando el mismo archivo se pisan
-      - ./logs/web:/app/logs
-
   bot:
     build: .
     container_name: endosos-bot

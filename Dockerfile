@@ -23,20 +23,7 @@ RUN --mount=type=cache,target=/root/.npm \
     npm prune --omit=dev
 
 
-# ---------- UI builder: compila la SPA React (portal) ----------
-FROM mcr.microsoft.com/playwright:v1.58.2-jammy AS ui-builder
-
-WORKDIR /ui
-
-COPY web/ui/package.json web/ui/package-lock.json ./
-RUN --mount=type=cache,target=/root/.npm \
-    npm ci
-
-COPY web/ui ./
-RUN npm run build
-
-
-# ---------- Runtime: imagen única para bot (CMD) y web (command en compose) ----------
+# ---------- Runtime: solo el bot (el portal web vive en el repo Portal_H2O) ----------
 FROM mcr.microsoft.com/playwright:v1.58.2-jammy
 
 ENV TZ=America/Chicago \
@@ -50,7 +37,6 @@ WORKDIR /app
 # Copiar artefactos de los builders
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
-COPY --from=ui-builder /ui/dist ./web/ui/dist
 COPY package.json ./
 # Solo agents.xlsx llega aquí (las DBs y el perfil quedan fuera por .dockerignore);
 # en el primer arranque Docker copia este contenido al volumen botdata vacío.

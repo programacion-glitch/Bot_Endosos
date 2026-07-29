@@ -22,8 +22,6 @@ manual_email_*.json
 Dockerfile
 .dockerignore
 docker-compose.yml
-web/ui/node_modules
-web/ui/dist
 data/*.db
 data/*.db-shm
 data/*.db-wal
