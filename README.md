@@ -1,6 +1,8 @@
 # Bot de Endosos H2O
 
-Bot que automatiza la documentación de endosos de seguros en NowCerts. Lee correos del buzón configurado, parsea los comandos del cuerpo del mensaje, y los ejecuta en NowCerts vía Playwright.
+Bot que automatiza la documentación de endosos de seguros en NowCerts. Consume la **cola del portal** (`jobs.db`) — los endosos que el Portal H2O encola — y ejecuta sus comandos en NowCerts vía Playwright.
+
+La ingesta por correo (IMAP) está **apagada por defecto** (`INGEST_EMAIL=false`): el bot solo procesa lo que encola el portal. Ponla en `true` para reactivar el buzón como respaldo. Los correos de **resultado** (review a `REVIEW_EMAIL`, notificaciones de error, aviso a `notifyTo`) se mantienen siempre vía SMTP.
 
 ---
 
@@ -8,15 +10,16 @@ Bot que automatiza la documentación de endosos de seguros en NowCerts. Lee corr
 
 - **Node.js 20+** (si se ejecuta sin Docker)
 - **Docker + Docker Compose** (recomendado)
-- Acceso al buzón IMAP configurado en `.env`
 - Credenciales válidas de NowCerts
+- Acceso al buzón IMAP **solo si** `INGEST_EMAIL=true` (respaldo opcional)
 
 ---
 
 ## Configuración inicial
 
 1. Copia `.env.example` a `.env` y completa las variables:
-   - **IMAP**: credenciales del buzón que recibe los correos del bot
+   - **INGEST_EMAIL**: `false` (solo cola del portal) o `true` (reactiva el buzón IMAP)
+   - **IMAP**: credenciales del buzón — solo si `INGEST_EMAIL=true`
    - **SMTP**: credenciales para enviar review emails y notificaciones
    - **NowCerts**: usuario y contraseña
    - **REVIEW_EMAIL**: destinatario del resumen (`services@h2oins.com`)

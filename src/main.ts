@@ -96,16 +96,24 @@ async function main(): Promise<void> {
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 
-  try {
-    await ensureMailbox(PROCESSED_FOLDER);
-    logger.info(`Mailbox "${PROCESSED_FOLDER}" ready.`);
-  } catch (err) {
-    logger.warn(`Could not verify mailbox "${PROCESSED_FOLDER}": ${(err as Error).message}`);
+  // La ingesta por correo (IMAP) está apagada por defecto: el bot solo consume la cola
+  // del portal. INGEST_EMAIL=true la reactiva (respaldo por buzón).
+  if (config.email.ingest) {
+    try {
+      await ensureMailbox(PROCESSED_FOLDER);
+      logger.info(`Mailbox "${PROCESSED_FOLDER}" ready.`);
+    } catch (err) {
+      logger.warn(`Could not verify mailbox "${PROCESSED_FOLDER}": ${(err as Error).message}`);
+    }
   }
 
-  logger.info('Bot ready. Worker único: drena la cola y luego IMAP, un job a la vez.');
+  logger.info(
+    config.email.ingest
+      ? 'Bot ready. Worker único: drena la cola y luego IMAP, un job a la vez.'
+      : 'Bot ready. Worker único: solo cola del portal (ingesta por correo apagada).'
+  );
 
-  // Worker unificado: un solo job a la vez (cola primero, luego IMAP).
+  // Worker unificado: un solo job a la vez (cola primero; IMAP solo si INGEST_EMAIL=true).
   while (true) {
     try {
       // 1. Drenar la cola del portal (un job a la vez)
@@ -127,18 +135,20 @@ async function main(): Promise<void> {
         }
       }
 
-      // 2. Procesar correos IMAP (respaldo)
-      const emails = await fetchUnseenEmails().catch(err => {
-        logger.error(`IMAP fetch error: ${(err as Error).message}`);
-        return [] as RawEmail[];
-      });
-      for (const email of emails) {
-        try {
-          await processEmail(email);
-        } catch (err) {
-          logger.error(`Unhandled error processing email "${email.subject}": ${(err as Error).message}`);
-        } finally {
-          await closeBrowserSafe();
+      // 2. Procesar correos IMAP (respaldo) — solo si la ingesta por correo está activa.
+      if (config.email.ingest) {
+        const emails = await fetchUnseenEmails().catch(err => {
+          logger.error(`IMAP fetch error: ${(err as Error).message}`);
+          return [] as RawEmail[];
+        });
+        for (const email of emails) {
+          try {
+            await processEmail(email);
+          } catch (err) {
+            logger.error(`Unhandled error processing email "${email.subject}": ${(err as Error).message}`);
+          } finally {
+            await closeBrowserSafe();
+          }
         }
       }
 
