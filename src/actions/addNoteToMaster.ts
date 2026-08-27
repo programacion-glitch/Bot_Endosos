@@ -34,7 +34,12 @@ export async function addNoteToMaster(
     const row = certRows.first();
     await row.locator('button, a, span').filter({ hasText: /Actions/i }).first().click({ force: true });
     await page.waitForTimeout(700);
-    await page.locator('.k-animation-container .k-item, .k-menu-popup .k-item').filter({ hasText: /^Edit$/i }).first().click();
+    // El ítem "Edit" del menú kendo se renderiza fuera del viewport tras la migración de
+    // Momentum (Ago-2026) → un .click() normal lanza "outside of viewport". Scroll + force,
+    // igual que el resto de clicks de este flujo.
+    const editItem = page.locator('.k-animation-container .k-item, .k-menu-popup .k-item').filter({ hasText: /^Edit$/i }).first();
+    await editItem.scrollIntoViewIfNeeded().catch(() => {});
+    await editItem.click({ force: true });
 
     // Wait for modal popup (rwPopup iframe) or full-page navigation
     await page.waitForURL('**/Certificates/Edit.aspx**', { timeout: 5_000 }).catch(() => {});
@@ -69,7 +74,10 @@ export async function addNoteToMaster(
 
     // Type realistically: Clear with Ctrl+A+Delete, then type character-by-character.
     // ASP.NET postback truncates when evaluate() sets el.value directly with special chars ($, commas).
-    await descField.click({ force: true });
+    // El campo Description del ACORD queda muy abajo en el iframe del RadWindow: un click por
+    // coordenadas cae fuera del viewport principal aun con force (→ "outside of viewport").
+    // focus() enfoca por DOM sin depender de la posición en pantalla.
+    await descField.focus().catch(async () => { await descField.evaluate((el: any) => el.focus()); });
     await page.keyboard.press('Control+A');
     await page.keyboard.press('Delete');
     await page.waitForTimeout(100);

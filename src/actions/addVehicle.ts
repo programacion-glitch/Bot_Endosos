@@ -226,13 +226,19 @@ async function openIdCardTemplate(page: Page): Promise<void> {
   }).first();
   const editHref = await editLink.getAttribute('href').catch(() => null);
 
-  if (!editHref) {
-    throw new Error('No se pudo obtener href del link Edit en el menú Actions del template');
+  // Tras la migración de Momentum (live 2026-08-20) el href de "Edit" pasó a ser relativo
+  // (ej. /AMSINS/Files/Insert.aspx?...). page.goto() exige URL absoluta, así que lo
+  // resolvemos contra el origin actual — mismo patrón que el "+ Add New" de Vehículos.
+  // Si el href no es navegable (javascript:/#/vacío), caemos al click directo del link.
+  // Navegación directa (full page load) en vez de click — evita estado residual del
+  // Momentum SPA. Esperamos networkidle para que PDF.js termine de bootstrapping.
+  if (editHref && (editHref.startsWith('http') || editHref.startsWith('/'))) {
+    const absoluteUrl = editHref.startsWith('http') ? editHref : new URL(editHref, page.url()).toString();
+    await page.goto(absoluteUrl, { waitUntil: 'domcontentloaded' });
+  } else {
+    await editLink.click({ force: true });
+    await page.waitForURL('**/Files/Insert.aspx**', { timeout: 20_000 }).catch(() => {});
   }
-
-  // Navegación directa (full page load) en vez de click — evita estado residual
-  // del Momentum SPA. Esperamos networkidle para que PDF.js termine de bootstrapping.
-  await page.goto(editHref, { waitUntil: 'domcontentloaded' });
   await page.waitForLoadState('networkidle', { timeout: 30_000 }).catch(() => {});
   await page.waitForTimeout(3000);
 
