@@ -45,8 +45,15 @@ export async function updateLPHolder(
       return fail('UPDATE_LP_HOLDER', `LP Holder "${cmd.holderName}" not found for VIN ${cmd.vin}`);
     }
     await holderRow.locator('button,span,a').filter({ hasText: /Actions/i }).first().click({ force: true });
-    await page.waitForTimeout(500);
-    await page.locator('li.k-item, span, a').filter({ hasText: /^Edit$/i }).first().click({ force: true });
+    await page.waitForTimeout(1000);
+    // El menú Actions del holder es un kendo popup (Details / Edit / Send Certificate / Remove).
+    // Un ".first()" sobre "Edit" global caía en el botón EDIT del insured (arriba) → navegaba a
+    // /Insureds/Edit y el fill de "Company Name" hacía timeout 60s. Acotamos al popup del holder
+    // y confirmamos que aterrizamos en /CertificateHolders/Edit/.
+    const holderMenu = page.locator('.k-animation-container, .k-menu-popup, .dropdown-menu')
+      .filter({ hasText: /Send Certificate/i }).last();
+    await holderMenu.getByText(/^Edit$/i).first().click({ force: true });
+    await page.waitForURL('**/CertificateHolders/Edit/**', { timeout: 20_000 });
     await page.waitForTimeout(2500);
 
     // Modify the requested value (name or address)
@@ -75,31 +82,37 @@ export async function updateLPHolder(
     await saveBtn.click({ force: true });
     await waitForSaveConfirmation(page);
 
-    // Navigate back to vehicles to Send Certificate via Lien Holders
-    await page.goto(vehiclesUrl, { waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(2000);
+    // Enviar certificado + descargar es best-effort: el update ya quedó guardado, así que un
+    // fallo acá no debe tirar el comando.
+    let files: string[] = [];
+    try {
+      await page.goto(vehiclesUrl, { waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(2000);
 
-    const vehicleRow2 = page.locator('tr').filter({ hasText: new RegExp(escapeRegex(cmd.vin), 'i') }).first();
-    await vehicleRow2.locator('button,span,a').filter({ hasText: /Actions/i }).first().click({ force: true });
-    await page.waitForTimeout(500);
-    await page.locator('li.k-item, span, a').filter({ hasText: /Lien\s*Holders/i }).first().click({ force: true });
-    await page.waitForTimeout(2000);
+      const vehicleRow2 = page.locator('tr').filter({ hasText: new RegExp(escapeRegex(cmd.vin), 'i') }).first();
+      await vehicleRow2.locator('button,span,a').filter({ hasText: /Actions/i }).first().click({ force: true });
+      await page.waitForTimeout(500);
+      await page.locator('li.k-item, span, a').filter({ hasText: /Lien\s*Holders/i }).first().click({ force: true });
+      await page.waitForTimeout(2000);
 
-    // Find updated holder row -> Actions -> Send Certificate
-    const effectiveName = cmd.updateTo;
-    const last4vin = cmd.vin.slice(-4);
-    const today = todayYYYYMMdd();
-    const filename = `${today} Certificate Holder & LP VIN# ${last4vin} (${safeFilenamePart(effectiveName)}).pdf`;
+      // Find updated holder row -> Actions -> Send Certificate
+      const effectiveName = cmd.updateTo;
+      const last4vin = cmd.vin.slice(-4);
+      const today = todayYYYYMMdd();
+      const filename = `${today} Certificate Holder & LP VIN# ${last4vin} (${safeFilenamePart(effectiveName)}).pdf`;
 
-    const holderRow2 = page.locator('tr').filter({ hasText: new RegExp(escapeRegex(effectiveName), 'i') }).first();
-    if (await holderRow2.count() === 0) {
-      logger.warn(`Updated LP Holder row not found for "${effectiveName}", trying original name`);
+      const holderRow2 = page.locator('tr').filter({ hasText: new RegExp(escapeRegex(effectiveName), 'i') }).first();
+      if (await holderRow2.count() === 0) {
+        logger.warn(`Updated LP Holder row not found for "${effectiveName}", trying original name`);
+      }
+
+      files = await downloadCertificate(page, filename, effectiveName, cmd.note).catch(err => {
+        logger.warn(`downloadCertificate not completed: ${(err as Error).message}`);
+        return [];
+      });
+    } catch (e) {
+      logger.warn(`updateLPHolder: paso Send Certificate/descarga no completado: ${(e as Error).message}`);
     }
-
-    const files = await downloadCertificate(page, filename, effectiveName, cmd.note).catch(err => {
-      logger.warn(`downloadCertificate not completed: ${(err as Error).message}`);
-      return [];
-    });
 
     return ok('UPDATE_LP_HOLDER', `LP Holder updated for VIN ${cmd.vin}`, files);
   } catch (err) {
