@@ -11,9 +11,9 @@ import { escapeRegex, toDigits, buildNowCertsUrl } from './_base';
 /* ------------------------------------------------------------------ */
 
 export const COVERAGES_VIEW = 'div.ibox:has(h4:text-is("Coverages")) span.label.state';
-export const COVERAGES_ARROW = '#ctl00_ContentPlaceHolder1_FormView1_ctl01_ctl23___LinesOfBusinessAndFees_rptManageCoverages_ctl00_usrCoveragesSelector_ddlCoveragesSections_Arrow';
-export const COVERAGES_REFRESH = '#ctl00_ContentPlaceHolder1_FormView1_ctl01_ctl23___LinesOfBusinessAndFees_btnRefreshSections';
-export const COVERAGES_DROPDOWN = '#ctl00_ContentPlaceHolder1_FormView1_ctl01_ctl23___LinesOfBusinessAndFees_rptManageCoverages_ctl00_usrCoveragesSelector_ddlCoveragesSections_DropDown li';
+export const COVERAGES_ARROW = '#ctl00_ContentPlaceHolder1_FormView1_ctl01_ctl24___LinesOfBusinessAndFees_rptManageCoverages_ctl00_usrCoveragesSelector_ddlCoveragesSections_Arrow';
+export const COVERAGES_REFRESH = '#ctl00_ContentPlaceHolder1_FormView1_ctl01_ctl24___LinesOfBusinessAndFees_btnRefreshSections';
+export const COVERAGES_DROPDOWN = '#ctl00_ContentPlaceHolder1_FormView1_ctl01_ctl24___LinesOfBusinessAndFees_rptManageCoverages_ctl00_usrCoveragesSelector_ddlCoveragesSections_DropDown li';
 export const AL_SECTION_CHECKBOX = '[id$="automobileLiability_cbAutomobileLiability"]';
 
 /* ------------------------------------------------------------------ */
@@ -90,7 +90,7 @@ export async function selectCoverageSection(page: Page, sectionName: string): Pr
       const doc = (globalThis as any).document;
       const items: any[] = Array.from(
         doc.querySelectorAll(
-          '#ctl00_ContentPlaceHolder1_FormView1_ctl01_ctl23___LinesOfBusinessAndFees_rptManageCoverages_ctl00_usrCoveragesSelector_ddlCoveragesSections_DropDown li'
+          '#ctl00_ContentPlaceHolder1_FormView1_ctl01_ctl24___LinesOfBusinessAndFees_rptManageCoverages_ctl00_usrCoveragesSelector_ddlCoveragesSections_DropDown li'
         )
       );
       const lower = name.toLowerCase();
@@ -132,7 +132,7 @@ export async function selectCoverageSection(page: Page, sectionName: string): Pr
           const doc = (globalThis as any).document;
           const items: any[] = Array.from(
             doc.querySelectorAll(
-              '#ctl00_ContentPlaceHolder1_FormView1_ctl01_ctl23___LinesOfBusinessAndFees_rptManageCoverages_ctl00_usrCoveragesSelector_ddlCoveragesSections_DropDown li'
+              '#ctl00_ContentPlaceHolder1_FormView1_ctl01_ctl24___LinesOfBusinessAndFees_rptManageCoverages_ctl00_usrCoveragesSelector_ddlCoveragesSections_DropDown li'
             )
           );
           const lower = name.toLowerCase();
