@@ -28,3 +28,7 @@ data/
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# Probe/diagnostic outputs (DOM dumps, screenshots — pueden contener datos de clientes)
+probe-out/
+portal-endosos-url.png
